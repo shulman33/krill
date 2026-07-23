@@ -1,0 +1,21 @@
+# Local editor/agent state
+.claude/settings.local.json
+.DS_Store
+
+# TLC model checker artifacts
+tla2tools.jar
+states/
+*.st
+
+# Go build output
+/bin/
+/dist/
+krilld
+*.test
+
+# Big binary artifacts that never belong in git
+*.ext4
+*.img
+vmstate
+mem
+*.log

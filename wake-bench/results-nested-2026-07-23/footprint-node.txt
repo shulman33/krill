@@ -1,0 +1,8 @@
+== snapshot footprint: node ==
+mem apparent: 512M
+mem actual:   113M   (after balloon + fallocate -d)
+rootfs golden: 1.0G apparent / 295M actual
+== snapshot footprint: node ==
+mem apparent: 512M
+mem actual:   113M   (after balloon + fallocate -d)
+rootfs golden: 1.0G apparent / 295M actual

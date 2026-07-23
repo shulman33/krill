@@ -1,0 +1,8 @@
+{
+  "name": "wake-bench-guest-node",
+  "private": true,
+  "dependencies": {
+    "express": "^4.19.0",
+    "better-sqlite3": "^11.0.0"
+  }
+}

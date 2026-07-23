@@ -1,0 +1,17 @@
+------------------------------------------------------------------------------
+Repository: /srv/dedup-disk
+Archive name: disk-1784820323
+Archive fingerprint: 32e2d7b77146065a391e2560b1efa80c1d199daa20ad9b3b5464b78ca046024b
+Time (start): Thu, 2026-07-23 15:25:23
+Time (end):   Thu, 2026-07-23 15:25:42
+Duration: 18.68 seconds
+Number of files: 10
+Utilization of max. archive size: 0%
+------------------------------------------------------------------------------
+                       Original size      Compressed size    Deduplicated size
+This archive:               10.74 GB            789.09 MB            326.84 MB
+All archives:               10.74 GB            789.09 MB            326.86 MB
+
+                       Unique chunks         Total chunks
+Chunk index:                     348                 1744
+------------------------------------------------------------------------------

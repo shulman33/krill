@@ -1,0 +1,8 @@
+== snapshot footprint: python ==
+mem apparent: 512M
+mem actual:   104M   (after balloon + fallocate -d)
+rootfs golden: 1.0G apparent / 164M actual
+== snapshot footprint: python ==
+mem apparent: 512M
+mem actual:   104M   (after balloon + fallocate -d)
+rootfs golden: 1.0G apparent / 164M actual

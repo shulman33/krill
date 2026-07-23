@@ -1,0 +1,17 @@
+------------------------------------------------------------------------------
+Repository: /srv/dedup-mem
+Archive name: mem-1784820310
+Archive fingerprint: b4b717fcf39401be75eb0a3f43eabc65a20ed26f2baa1609a8356a319f2469e8
+Time (start): Thu, 2026-07-23 15:25:11
+Time (end):   Thu, 2026-07-23 15:25:22
+Duration: 11.19 seconds
+Number of files: 10
+Utilization of max. archive size: 0%
+------------------------------------------------------------------------------
+                       Original size      Compressed size    Deduplicated size
+This archive:                5.37 GB            444.66 MB            364.40 MB
+All archives:                5.37 GB            444.66 MB            364.42 MB
+
+                       Unique chunks         Total chunks
+Chunk index:                     395                  891
+------------------------------------------------------------------------------

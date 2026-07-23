@@ -1,0 +1,398 @@
+<title>The Sleeping Cloud, Explained</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f7f8fa; --surface: #fdfdfe;
+    --ink: #171b21; --ink-2: #4e5661; --ink-3: #8a919b;
+    --hairline: #e3e6ea; --code-bg: #eef1f5;
+    --accent: #2a78d6; --accent-ink: #1c5cab;
+    --tier-1: #104281; --tier-2: #2a78d6; --tier-3: #5598e7; --tier-4: #9ec5f4;
+    --good: #0ca30c;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --serif: Charter, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --bg: #0e1116; --surface: #141920;
+      --ink: #eef1f5; --ink-2: #a9b1bc; --ink-3: #79818c;
+      --hairline: #242b34; --code-bg: #1d242e;
+      --accent: #3987e5; --accent-ink: #6da7ec;
+      --tier-1: #9ec5f4; --tier-2: #6da7ec; --tier-3: #3987e5; --tier-4: #1c5cab;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1116; --surface: #141920;
+    --ink: #eef1f5; --ink-2: #a9b1bc; --ink-3: #79818c;
+    --hairline: #242b34; --code-bg: #1d242e;
+    --accent: #3987e5; --accent-ink: #6da7ec;
+    --tier-1: #9ec5f4; --tier-2: #6da7ec; --tier-3: #3987e5; --tier-4: #1c5cab;
+  }
+
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--serif); font-size: 18px; line-height: 1.72;
+    margin: 0; padding: 0 22px 110px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .col  { max-width: 62ch;  margin: 0 auto; }
+  .wide { max-width: 880px; margin: 0 auto; }
+
+  h1, h2 { font-family: var(--sans); text-wrap: balance; letter-spacing: -0.018em; }
+  h1 { font-size: clamp(34px, 6vw, 52px); font-weight: 760; line-height: 1.06; margin: 14px 0 18px; }
+  h2 { font-size: 27px; font-weight: 720; line-height: 1.2; margin: 0 0 16px; }
+  p { margin: 0 0 20px; }
+  strong { font-weight: 640; }
+  em { font-style: italic; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.15em;
+    text-transform: uppercase; color: var(--ink-3); margin: 0 0 8px;
+  }
+  .eyebrow b { color: var(--accent-ink); font-weight: 600; }
+  header.masthead { padding: 72px 0 10px; }
+  .subtitle { font-size: 21px; color: var(--ink-2); line-height: 1.55; margin: 0 0 8px; max-width: 56ch; }
+  .readtime { font-family: var(--sans); font-size: 13.5px; color: var(--ink-3); }
+
+  section { margin-top: 84px; }
+  .kicker {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.15em;
+    text-transform: uppercase; color: var(--accent-ink); margin: 0 0 10px;
+  }
+
+  .pull {
+    font-family: var(--sans); font-size: 24px; font-weight: 650; line-height: 1.4;
+    letter-spacing: -0.01em; text-wrap: balance;
+    border-left: 3px solid var(--accent); padding: 4px 0 4px 22px;
+    margin: 34px 0;
+  }
+  .pull small { display: block; font-size: 14px; font-weight: 450; color: var(--ink-3); margin-top: 8px; }
+
+  /* ---------- sleep ladder ---------- */
+  .ladder { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin: 30px 0 10px; font-family: var(--sans); }
+  .rung {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+    border-top: 4px solid var(--rc); padding: 18px 18px 16px;
+  }
+  .rung .zz { font-family: var(--mono); font-size: 12px; color: var(--rc); font-weight: 700; letter-spacing: 0.06em; }
+  .rung h3 { font-size: 17px; font-weight: 700; margin: 6px 0 8px; font-family: var(--sans); }
+  .rung p { font-size: 13.5px; color: var(--ink-2); line-height: 1.55; margin: 0 0 12px; }
+  .rung .fact { font-family: var(--mono); font-size: 12px; color: var(--ink); margin-top: 4px; }
+  .rung .fact span { color: var(--ink-3); }
+  .ladder-cap { font-family: var(--sans); font-size: 13.5px; color: var(--ink-3); margin-top: 12px; }
+
+  /* ---------- journey strip ---------- */
+  .journey { counter-reset: jstep; display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 0; margin: 30px 0 6px; font-family: var(--sans); }
+  .jstep { position: relative; padding: 0 18px 0 0; }
+  .jstep::before {
+    counter-increment: jstep; content: counter(jstep);
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-weight: 700; font-size: 14px;
+    margin-bottom: 12px;
+  }
+  .jstep::after {
+    content: ""; position: absolute; top: 14.5px; left: 40px; right: 8px;
+    border-top: 2px solid var(--hairline);
+  }
+  .jstep:last-child::after { display: none; }
+  .jstep h3 { font-size: 15px; font-weight: 700; margin: 0 0 6px; font-family: var(--sans); }
+  .jstep p { font-size: 13.5px; color: var(--ink-2); line-height: 1.5; margin: 0; }
+  @media (max-width: 560px) {
+    .journey { grid-template-columns: 1fr; gap: 18px; }
+    .jstep::after { display: none; }
+  }
+
+  /* ---------- ticket story ---------- */
+  .tickets { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin: 30px 0 8px; font-family: var(--sans); }
+  .panel {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+    padding: 20px; text-align: center;
+  }
+  .ticket {
+    display: inline-block; background: var(--code-bg);
+    border: 1.5px dashed var(--ink-3); border-radius: 8px;
+    font-family: var(--mono); font-size: 15px; font-weight: 700;
+    padding: 9px 18px; margin-bottom: 14px; color: var(--ink);
+  }
+  .ticket.dead { text-decoration: line-through; color: var(--ink-3); border-color: var(--hairline); }
+  .ticket.live { border-color: var(--accent); border-style: solid; color: var(--accent-ink); }
+  .panel p { font-size: 13.5px; color: var(--ink-2); line-height: 1.55; margin: 0; }
+  .panel .who { font-size: 12px; font-family: var(--mono); color: var(--ink-3); letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 10px; }
+
+  /* ---------- share sheet mock ---------- */
+  .sheet {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px;
+    max-width: 480px; margin: 30px auto 8px; padding: 22px 22px 18px;
+    font-family: var(--sans); box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+  }
+  .sheet h3 { font-size: 16px; font-weight: 700; margin: 0 0 4px; }
+  .sheet .sub { font-size: 13px; color: var(--ink-3); margin: 0 0 16px; }
+  .srow { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--hairline); }
+  .srow .av {
+    width: 32px; height: 32px; border-radius: 50%; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff; background: var(--accent);
+  }
+  .srow .av.g { background: var(--ink-3); }
+  .srow .who2 { flex: 1; min-width: 0; }
+  .srow .who2 b { display: block; font-size: 14px; font-weight: 650; }
+  .srow .who2 span { font-size: 12px; color: var(--ink-3); }
+  .srow .role {
+    font-size: 12px; font-family: var(--sans); color: var(--ink-2);
+    border: 1px solid var(--hairline); border-radius: 8px; padding: 4px 10px; white-space: nowrap;
+  }
+  .sheet .link { font-size: 12.5px; color: var(--accent-ink); border-top: 1px solid var(--hairline); padding-top: 12px; margin-top: 4px; }
+  .sheet-cap { font-family: var(--sans); font-size: 13.5px; color: var(--ink-3); text-align: center; margin-top: 12px; }
+
+  /* ---------- big numbers ---------- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 2px; border-radius: 12px; overflow: hidden; margin: 30px 0 10px; font-family: var(--sans); }
+  .stat { background: var(--surface); padding: 22px 20px 18px; }
+  .stat .v { font-size: 34px; font-weight: 720; letter-spacing: -0.02em; line-height: 1.05; color: var(--accent-ink); }
+  .stat .l { font-size: 13px; color: var(--ink-2); margin-top: 8px; line-height: 1.5; }
+  .stats-cap { font-family: var(--sans); font-size: 13.5px; color: var(--ink-3); margin-top: 12px; }
+
+  /* ---------- status ---------- */
+  ul.status { list-style: none; padding: 0; margin: 26px 0; font-family: var(--sans); display: grid; gap: 12px; }
+  ul.status li {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 14px 18px; font-size: 15px; color: var(--ink-2); display: flex; gap: 14px; align-items: baseline;
+  }
+  ul.status .mark { font-family: var(--mono); font-size: 12px; font-weight: 700; white-space: nowrap; }
+  ul.status .done .mark { color: var(--good); }
+  ul.status .next .mark { color: var(--accent-ink); }
+  ul.status b { color: var(--ink); }
+
+  /* ---------- glossary ---------- */
+  .gloss { border: 1px solid var(--hairline); border-radius: 12px; background: var(--surface); overflow: hidden; margin: 26px 0; }
+  .grow { display: grid; grid-template-columns: 150px 1fr; gap: 16px; padding: 13px 20px; border-top: 1px solid var(--hairline); font-family: var(--sans); font-size: 14.5px; }
+  .grow:first-child { border-top: none; }
+  .grow .term { font-family: var(--mono); font-size: 13px; color: var(--accent-ink); font-weight: 600; }
+  .grow .def { color: var(--ink-2); line-height: 1.55; }
+  @media (max-width: 520px) { .grow { grid-template-columns: 1fr; gap: 4px; } }
+
+  footer.end { margin-top: 90px; padding-top: 20px; border-top: 1px solid var(--hairline); font-family: var(--mono); font-size: 12px; color: var(--ink-3); line-height: 1.9; }
+  a { color: var(--accent-ink); text-underline-offset: 3px; }
+</style>
+
+<header class="masthead">
+  <div class="col">
+    <p class="eyebrow"><b>Plain-English explainer</b> · The Sleeping Cloud project</p>
+    <h1>A cloud for software with five users</h1>
+    <p class="subtitle">AI can now write a little app for your team in minutes. This is the machine that makes sharing that app as easy as sharing a document — explained without the jargon.</p>
+    <p class="readtime">About a 7-minute read. The technical versions of everything here exist; this page is the one you send to a human.</p>
+  </div>
+</header>
+
+<section>
+  <div class="col">
+    <p class="kicker">The problem</p>
+    <h2>Software just got small. The cloud didn't notice.</h2>
+    <p>For fifty years, software was only worth building if lots of people would use it. Nobody was going to spend six months coding a tracker for <em>your team's</em> lunch orders, or a sprint board that works exactly the way <em>your</em> team runs sprints. So we all squeezed into big one-size-fits-all products instead.</p>
+    <p>AI assistants quietly broke that rule. Today you can describe a little tool in plain English and have working software twenty minutes later — software with an audience of five. Building it is now the easy part.</p>
+    <p><strong>Sharing it is still stuck in 2005.</strong> To get that lunch tracker in front of your teammates you need a server, a deployment pipeline, a login system, and a security review — the full costume of a real software company, for something the size of a spreadsheet. It's like being able to write a letter in seconds but needing to build a post office to mail it.</p>
+    <p>Meanwhile, sharing a <em>document</em> is one click. That's the standard this project holds itself to: <strong>a little app should be as easy to share — and as cheap to keep — as a Google Doc.</strong></p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="kicker">The core trick</p>
+    <h2>Apps that sleep</h2>
+    <p>Here's the thing about small software: it's almost always idle. Your team's tracker gets used maybe ten minutes a day. Renting it a full-time server is like leaving your car running in the driveway all week for two trips to the store.</p>
+    <p>So this cloud does what your laptop does when you close the lid. When nobody's using an app, we take a <strong>snapshot</strong> — a complete photograph of everything in its memory, mid-thought — save it to disk, and switch the app off. It costs nothing to run, because it isn't running. When someone opens the link, we restore the photograph and the app picks up exactly where it left off, in a fraction of a second. It never knows it was asleep.</p>
+    <p>The deeper an app sleeps, the cheaper it gets and the longer the yawn when it wakes:</p>
+  </div>
+  <div class="wide">
+    <div class="ladder">
+      <div class="rung" style="--rc: var(--tier-1)">
+        <div class="zz">AWAKE</div>
+        <h3>In use right now</h3>
+        <p>Someone's on the page. The app is live in memory, answering instantly.</p>
+        <div class="fact">wakes: <span>already awake</span></div>
+        <div class="fact">cost: <span>the only expensive state</span></div>
+      </div>
+      <div class="rung" style="--rc: var(--tier-2)">
+        <div class="zz">DOZING</div>
+        <h3>Used minutes ago</h3>
+        <p>Snapshot parked on fast local storage, ready to spring back.</p>
+        <div class="fact">wakes: <span>~¼ second — a blink</span></div>
+        <div class="fact">cost: <span>pennies</span></div>
+      </div>
+      <div class="rung" style="--rc: var(--tier-3)">
+        <div class="zz">ASLEEP</div>
+        <h3>Used this week</h3>
+        <p>Snapshot moved to ordinary cloud storage nearby.</p>
+        <div class="fact">wakes: <span>1–3 seconds — a breath</span></div>
+        <div class="fact">cost: <span>under a cent a month</span></div>
+      </div>
+      <div class="rung" style="--rc: var(--tier-4)">
+        <div class="zz">DEEP SLEEP</div>
+        <h3>Where 95% of apps live</h3>
+        <p>Filed away in archive storage. Never deleted, always wakeable.</p>
+        <div class="fact">wakes: <span>a few seconds</span></div>
+        <div class="fact">cost: <span>about ⅓ of a cent a month</span></div>
+      </div>
+    </div>
+    <p class="ladder-cap">Apps drift rightward as they cool, and jump all the way back the moment anyone clicks. Nothing is ever thrown away — at a third of a cent a month, there's no reason to delete anything.</p>
+  </div>
+  <div class="col">
+    <div class="pull">A sleeping app costs about a third of a cent per month.<small>That single number is what makes "share it like a doc" a real price instead of a slogan.</small></div>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="kicker">The experience</p>
+    <h2>What happens when you click a shared link</h2>
+    <p>Say a colleague built a vacation-day tracker and shared it with you. Weeks later, you click the link. The app has been in deep sleep the whole time. Here's the journey your click takes:</p>
+  </div>
+  <div class="wide">
+    <div class="journey">
+      <div class="jstep"><h3>You click</h3><p>The link opens like any web page.</p></div>
+      <div class="jstep"><h3>The front desk checks you in</h3><p>Your normal work login — no new password, no sign-up form.</p></div>
+      <div class="jstep"><h3>Your request waits a moment</h3><p>The app is asleep, so we hold your click at the door…</p></div>
+      <div class="jstep"><h3>The app wakes up</h3><p>…restore it from its snapshot, mid-thought, exactly as it was…</p></div>
+      <div class="jstep"><h3>You're in</h3><p>…and hand it your click. One slightly slow page load. Never an error.</p></div>
+    </div>
+  </div>
+  <div class="col">
+    <p style="margin-top: 18px;">While anyone's using it, the app stays awake and feels instant. A few minutes after the last person leaves, it quietly goes back to sleep. You never think about any of this — which is the point.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="kicker">Sharing</p>
+    <h2>It shares like a document, because it should</h2>
+    <p>Here's the part that makes sharing AI-written software safe: <strong>the app itself contains no login code at all.</strong> Zero. The platform stands at the front door like a doorman — it checks who you are, checks the guest list, and only then lets your request through, wearing a name tag the app can trust.</p>
+    <p>That guest list looks exactly like the one you already know:</p>
+  </div>
+  <div class="wide">
+    <div class="sheet" role="img" aria-label="A share dialog: domain-wide use access, one editor, owner-only data access, plus a share link">
+      <h3>Share “Vacation Tracker”</h3>
+      <p class="sub">People with access</p>
+      <div class="srow">
+        <span class="av g">A</span>
+        <span class="who2"><b>Anyone at acme.com</b><span>your whole company</span></span>
+        <span class="role">Can use</span>
+      </div>
+      <div class="srow">
+        <span class="av">S</span>
+        <span class="who2"><b>Sam</b><span>sam@acme.com · built it</span></span>
+        <span class="role">Can edit</span>
+      </div>
+      <div class="srow">
+        <span class="av g">◦</span>
+        <span class="who2"><b>The data inside</b><span>who submitted what</span></span>
+        <span class="role">Owner only</span>
+      </div>
+      <div class="link">🔗 Anyone with the link can use — copy link</div>
+    </div>
+    <p class="sheet-cap">Not a mock-up of some future dream — this is the entire permission model.</p>
+  </div>
+  <div class="col">
+    <p style="margin-top: 22px;">Three things are worth noticing. <strong>“Can edit” includes AI:</strong> giving someone edit access increasingly means their AI assistant can change the app too, so it's a real decision, not a checkbox. <strong>The data has its own row:</strong> being allowed to <em>use</em> an app doesn't mean you can read everything other people typed into it. And <strong>un-sharing works instantly</strong> — because every visit passes the doorman, removing someone takes effect on their very next click. No passwords to rotate, nothing to redeploy.</p>
+    <p>One more quiet safety property: since your company login never touches the app's code — code an AI wrote and nobody read line-by-line — a badly behaved app can't steal what it never sees.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="kicker">Data safety</p>
+    <h2>The deli-ticket rule, or: why confusion can't corrupt your data</h2>
+    <p>Every app keeps its records in its own little notebook (a small private database). The classic way clouds destroy data is embarrassingly mundane: a machine freezes or loses its network connection, the system moves the app to a healthy machine, and then the frozen one <em>wakes up convinced it's still in charge</em> — and both copies write to the notebook at once. The damage is silent and you find out weeks later.</p>
+    <p>On a cloud where apps are <em>deliberately</em> frozen and thawed thousands of times a day, that failure would be the normal case, not the freak accident. So the rule here is mechanical, like tickets at a deli counter:</p>
+  </div>
+  <div class="wide">
+    <div class="tickets">
+      <div class="panel">
+        <div class="who">Machine A</div>
+        <div class="ticket">№ 41</div>
+        <p>Takes ticket 41, runs the app, writes happily in the notebook — then freezes mid-sentence.</p>
+      </div>
+      <div class="panel">
+        <div class="who">Machine B</div>
+        <div class="ticket live">№ 42</div>
+        <p>The counter notices A went quiet, hands ticket 42 to machine B. B carries on from A's last <em>completed</em> line.</p>
+      </div>
+      <div class="panel">
+        <div class="who">Machine A, three weeks later</div>
+        <div class="ticket dead">№ 41</div>
+        <p>Wakes up and tries to write. The notebook checks the ticket: <em>expired.</em> Politely turned away. No harm done.</p>
+      </div>
+    </div>
+  </div>
+  <div class="col">
+    <p style="margin-top: 22px;">The tickets only ever count upward, and it's the <strong>notebook itself</strong> that checks them — not the machines, which can be confused, frozen, or (since AI wrote the app) simply not trusted. A machine can sleep for a month and wake up supremely confident; confidence doesn't beat an expired ticket.</p>
+    <p>And because every change is written into a journal before it counts, the notebook can be rebuilt <em>as of any moment</em>. Your AI assistant rewrote the app on Tuesday and mangled the data? Roll back to Tuesday, 2:59 pm — the same way you'd restore an old version of a document. Undo is not a feature bolted on top; it falls straight out of how the data is stored.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="kicker">Confidence</p>
+    <h2>We let a machine try to break it</h2>
+    <p>Rules like the deli ticket sound airtight in a paragraph. The failures live in the weird orderings — <em>what if the machine freezes after taking a ticket but before writing anything, and wakes up mid-handover?</em> Humans are bad at imagining all of those. So we didn't rely on imagining.</p>
+    <p>First, we wrote out nine deliberate sabotage scenarios — frozen machines, split networks, stale snapshots — and walked each one through the rules on paper. Then we went further: we described the whole system in a mathematical language and had a <strong>model checker</strong> — a program whose only job is to try every possible ordering of events — explore roughly <strong>27,000 distinct situations</strong>. Every safety rule held in all of them.</p>
+    <p>Two details make that more than a rubber stamp. When we deliberately <em>removed</em> a safety rule and re-ran the checker, it immediately produced the exact disaster that rule prevents — proof the rules are load-bearing, not decorative. And the checker found <strong>one failure story the humans had missed entirely</strong>: a machine that stalls at the worst possible microsecond during wake-up, in a way that only one specific rule catches. We'd written that rule as a belt-and-suspenders extra. It turned out to be the only thing standing there.</p>
+    <div class="pull">The humans found eight ways to break it. The machine found the ninth.<small>Which is exactly why the machine stays in the loop for every future change.</small></div>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="kicker">The economics</p>
+    <h2>Why the math works</h2>
+    <p>Everything above compounds into one financial fact: apps that sleep are so cheap to keep that the platform can afford to host <em>enormous</em> numbers of them. Modeled at a million apps:</p>
+  </div>
+  <div class="wide">
+    <div class="stats">
+      <div class="stat"><div class="v">⅓¢</div><div class="l">per month to keep a sleeping app — cheap enough to never delete anything</div></div>
+      <div class="stat"><div class="v">~$20k</div><div class="l">monthly infrastructure for one million apps — about two dozen servers</div></div>
+      <div class="stat"><div class="v">17×</div><div class="l">cheaper than the traditional approach of keeping every app running</div></div>
+      <div class="stat"><div class="v">¼ sec</div><div class="l">wake-up target — the pause you barely notice on that first click</div></div>
+    </div>
+    <p class="stats-cap">Honest label: these are modeled numbers, not measured ones — with one exception in progress. The wake-up speed is the assumption everything else leans on, so a hardware benchmark is scripted and ready to run for about $25 of cloud time.</p>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="kicker">Status</p>
+    <h2>Where the project stands</h2>
+    <ul class="status">
+      <li class="done"><span class="mark">DONE</span><span><b>Design pressure-tested nine ways</b> — every plausible failure walked through, with the fix for each written into the rules.</span></li>
+      <li class="done"><span class="mark">DONE</span><span><b>Safety rules machine-verified</b> — ~27,000 situations checked; sabotaged versions fail exactly as they should.</span></li>
+      <li class="done"><span class="mark">DONE</span><span><b>Economics modeled interactively</b> — every assumption is a slider you can drag and disagree with.</span></li>
+      <li class="next"><span class="mark">NEXT</span><span><b>Measure the wake-up speed on real hardware</b> — scripts ready, ~$25 of cloud time, three days.</span></li>
+      <li class="next"><span class="mark">NEXT</span><span><b>First working prototype</b> — a deploy tool for AI assistants plus the share-by-link front door, built on rented infrastructure to test whether teams actually keep using what they're sent.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <p class="kicker">If you go deeper</p>
+    <h2>A small dictionary for the technical documents</h2>
+    <p>The engineering versions of this page use six words a lot. Here's what they mean in the language of this page:</p>
+    <div class="gloss">
+      <div class="grow"><span class="term">snapshot</span><span class="def">The photograph of a sleeping app's memory — everything, mid-thought — that lets it wake up exactly where it left off.</span></div>
+      <div class="grow"><span class="term">microVM</span><span class="def">The tiny sealed computer-within-a-computer each app runs in, so a thousand strangers' apps can share one machine without touching each other.</span></div>
+      <div class="grow"><span class="term">epoch</span><span class="def">The deli-ticket number. Only the newest ticket may write; the numbers only ever count up.</span></div>
+      <div class="grow"><span class="term">fencing</span><span class="def">The act of turning away an expired ticket — done by the notebook, never by trusting the machine.</span></div>
+      <div class="grow"><span class="term">WAL</span><span class="def">The journal every change is written into before it counts — the thing that makes "roll back to Tuesday, 2:59 pm" possible.</span></div>
+      <div class="grow"><span class="term">wake-on-request</span><span class="def">Holding your click at the door for a heartbeat while the app is restored, so you see one slow page load instead of an error.</span></div>
+    </div>
+    <p>The technical companions: <em>Fencing the Sleeping Cloud</em> (the failure scenarios and the economics model), <em>The Sleeping Cloud — Architecture</em> (six engineering diagrams), a machine-checkable specification of the ticket rules, and the hardware benchmark plan. Same system, four altitudes.</p>
+  </div>
+</section>
+
+<footer class="end">
+  <div class="col">
+    the sleeping cloud, explained · plain-english edition · 2026-07-22<br>
+    numbers quoted here match the interactive model's defaults; when the benchmark reports, this page gets its measured wake-up time.
+  </div>
+</footer>

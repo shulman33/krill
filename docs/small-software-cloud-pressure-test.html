@@ -1,0 +1,1041 @@
+<title>Fencing the Sleeping Cloud — design pressure test</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f7f8fa;
+    --surface: #fdfdfe;
+    --ink: #171b21;
+    --ink-2: #4e5661;
+    --ink-3: #8a919b;
+    --hairline: #e3e6ea;
+    --accent: #2a78d6;
+    --accent-ink: #1c5cab;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --ord-1: #86b6ef;
+    --ord-2: #2a78d6;
+    --ord-3: #104281;
+    --crit: #d03b3b;
+    --serious: #ec835a;
+    --warn: #fab219;
+    --good: #0ca30c;
+    --grid: #e8eaee;
+    --baseline: #c6cad1;
+    --code-bg: #eef1f5;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --serif: Charter, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --bg: #0e1116;
+      --surface: #141920;
+      --ink: #eef1f5;
+      --ink-2: #a9b1bc;
+      --ink-3: #79818c;
+      --hairline: #242b34;
+      --accent: #3987e5;
+      --accent-ink: #6da7ec;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --ord-1: #9ec5f4;
+      --ord-2: #5598e7;
+      --ord-3: #1c5cab;
+      --grid: #222933;
+      --baseline: #3a434f;
+      --code-bg: #1d242e;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1116;
+    --surface: #141920;
+    --ink: #eef1f5;
+    --ink-2: #a9b1bc;
+    --ink-3: #79818c;
+    --hairline: #242b34;
+    --accent: #3987e5;
+    --accent-ink: #6da7ec;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --ord-1: #9ec5f4;
+    --ord-2: #5598e7;
+    --ord-3: #1c5cab;
+    --grid: #222933;
+    --baseline: #3a434f;
+    --code-bg: #1d242e;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 20px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .col { max-width: 66ch; margin: 0 auto; }
+  .wide { max-width: 1020px; margin: 0 auto; }
+
+  h1, h2, h3 { font-family: var(--sans); text-wrap: balance; }
+  h1 {
+    font-size: clamp(30px, 5vw, 44px);
+    font-weight: 750;
+    letter-spacing: -0.02em;
+    line-height: 1.08;
+    margin: 10px 0 12px;
+  }
+  h2 {
+    font-size: 25px; font-weight: 700; letter-spacing: -0.012em;
+    margin: 0 0 6px;
+  }
+  h3 { font-size: 18.5px; font-weight: 650; margin: 40px 0 10px; }
+  p { margin: 0 0 18px; }
+  a { color: var(--accent-ink); text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: var(--accent); }
+  strong { font-weight: 640; }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 6px;
+  }
+  .eyebrow b { color: var(--accent-ink); font-weight: 600; }
+
+  header.masthead { padding: 64px 0 8px; }
+  .subtitle { font-size: 19px; color: var(--ink-2); max-width: 60ch; margin: 0 0 26px; }
+  .docmeta {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-3);
+    display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 18px;
+  }
+  .epochrule { display: block; width: 100%; height: auto; margin: 6px 0 4px; }
+
+  nav.toc {
+    font-family: var(--sans); font-size: 14.5px;
+    border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline);
+    padding: 14px 0; margin: 26px 0 0;
+    display: flex; flex-wrap: wrap; gap: 8px 28px;
+  }
+  nav.toc a { color: var(--ink-2); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent-ink); }
+  nav.toc .n { font-family: var(--mono); font-size: 11.5px; color: var(--accent-ink); margin-right: 7px; }
+
+  section { margin-top: 72px; }
+  .part-head { margin-bottom: 26px; }
+  .part-head .rule { height: 3px; width: 56px; background: var(--accent); border-radius: 2px; margin: 14px 0 0; }
+  .part-lede { font-size: 18px; color: var(--ink-2); }
+
+  code {
+    font-family: var(--mono); font-size: 0.82em;
+    background: var(--code-bg); border-radius: 4px; padding: 1.5px 5.5px;
+  }
+
+  /* ------ rule / invariant lists ------ */
+  ol.rules { list-style: none; margin: 20px 0 26px; padding: 0; display: grid; gap: 10px; }
+  ol.rules li {
+    display: grid; grid-template-columns: 52px 1fr; gap: 14px;
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 8px;
+    padding: 13px 16px; font-size: 15.5px;
+  }
+  ol.rules .tag {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--accent-ink);
+    padding-top: 2px;
+  }
+
+  /* ------ callout / decision boxes ------ */
+  .callout {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-left: 3px solid var(--accent); border-radius: 8px;
+    padding: 16px 20px; margin: 24px 0; font-size: 15.5px;
+  }
+  .callout .kicker {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.13em;
+    text-transform: uppercase; color: var(--accent-ink); margin: 0 0 6px;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+
+  /* ------ tables ------ */
+  .tablewrap { overflow-x: auto; margin: 20px 0 26px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--surface); }
+  table.doc {
+    border-collapse: collapse; width: 100%; min-width: 640px;
+    font-family: var(--sans); font-size: 14px;
+  }
+  table.doc th {
+    text-align: left; font-weight: 600; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--ink-3); padding: 11px 14px; border-bottom: 1px solid var(--hairline);
+  }
+  table.doc td { padding: 11px 14px; border-bottom: 1px solid var(--hairline); vertical-align: top; color: var(--ink-2); }
+  table.doc td:first-child { color: var(--ink); font-weight: 550; white-space: nowrap; }
+  table.doc tr:last-child td { border-bottom: none; }
+  table.doc .mono { font-family: var(--mono); font-size: 12.5px; }
+  table.doc td.num { font-variant-numeric: tabular-nums; }
+
+  /* ------ diagrams ------ */
+  .diagram {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px;
+    padding: 18px 14px 8px; margin: 22px 0; overflow-x: auto;
+  }
+  .diagram .cap {
+    font-family: var(--sans); font-size: 13px; color: var(--ink-3);
+    padding: 8px 8px 8px; border-top: 1px solid var(--hairline); margin-top: 10px;
+  }
+  pre.mermaid { display: flex; justify-content: center; margin: 0; background: transparent; }
+
+  /* ------ pressure test cards ------ */
+  .pt {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px;
+    margin: 18px 0; overflow: hidden;
+    border-left-width: 4px;
+  }
+  .pt.crit { border-left-color: var(--crit); }
+  .pt.serious { border-left-color: var(--serious); }
+  .pt.watch { border-left-color: var(--warn); }
+  .pt header {
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    padding: 15px 20px 4px;
+  }
+  .pt .ptid { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
+  .pt h3 { font-size: 17.5px; margin: 0; flex: 1 1 auto; }
+  .sev {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-2); white-space: nowrap;
+  }
+  .sev .g { font-size: 11px; margin-right: 5px; }
+  .sev.crit .g { color: var(--crit); }
+  .sev.serious .g { color: var(--serious); }
+  .sev.watch .g { color: var(--warn); }
+  .pt .body {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 2px 26px; padding: 8px 20px 18px;
+  }
+  .pt .cell { font-size: 14.5px; color: var(--ink-2); font-family: var(--sans); line-height: 1.55; }
+  .pt .cell .lbl {
+    display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em;
+    text-transform: uppercase; color: var(--ink-3); margin: 10px 0 4px;
+  }
+  .pt .cell b { color: var(--ink); font-weight: 600; }
+
+  /* ------ calculator ------ */
+  .panel {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+    padding: 24px; margin: 24px 0; font-family: var(--sans);
+  }
+  .panel h3 { margin-top: 0; }
+  .sliders { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px 28px; }
+  .sl label { display: flex; justify-content: space-between; align-items: baseline; font-size: 13.5px; color: var(--ink-2); margin-bottom: 6px; gap: 12px; }
+  .sl .val { font-family: var(--mono); font-size: 13px; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sl input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; }
+  .sl input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .constants {
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); line-height: 1.8;
+    border-top: 1px solid var(--hairline); margin-top: 20px; padding-top: 12px;
+  }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 2px; margin: 26px 0 8px; border-radius: 10px; overflow: hidden; }
+  .tile { background: var(--bg); padding: 16px 16px 14px; }
+  .tile .v { font-size: 26px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.1; }
+  .tile .v small { font-size: 15px; font-weight: 550; color: var(--ink-2); }
+  .tile .l { font-family: var(--mono); font-size: 10px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--ink-3); margin-top: 6px; line-height: 1.5; }
+  .tile.hero .v { color: var(--accent-ink); }
+
+  .breakdown { margin-top: 18px; display: grid; gap: 9px; }
+  .brow { display: grid; grid-template-columns: 200px 1fr 130px; gap: 14px; align-items: center; font-size: 13.5px; }
+  .brow .lbl { color: var(--ink-2); }
+  .brow .track { background: var(--code-bg); border-radius: 3px; height: 14px; overflow: hidden; }
+  .brow .fill { height: 100%; border-radius: 3px; }
+  @media (prefers-reduced-motion: no-preference) { .brow .fill { transition: width 200ms ease; } }
+  .brow .num { font-family: var(--mono); font-size: 12.5px; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+  .brow .num span { color: var(--ink-3); }
+  @media (max-width: 620px) { .brow { grid-template-columns: 120px 1fr 110px; } }
+
+  .foot { font-size: 13px; color: var(--ink-3); font-family: var(--sans); margin-top: 14px; line-height: 1.6; }
+
+  /* ------ charts ------ */
+  .viz-root { font-family: var(--sans); }
+  .chartcard {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+    padding: 20px 20px 12px; margin: 26px 0;
+  }
+  .chartcard .ct { font-size: 16px; font-weight: 650; font-family: var(--sans); }
+  .chartcard .cs { font-size: 13.5px; color: var(--ink-2); font-family: var(--sans); margin: 3px 0 10px; }
+  .legend { display: flex; gap: 20px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin: 4px 0 6px; }
+  .legend .chip { display: inline-flex; align-items: center; gap: 7px; }
+  .legend .sw { width: 11px; height: 11px; border-radius: 3px; }
+  .chart-wrap { position: relative; }
+  .chart-wrap svg { display: block; }
+  .tip {
+    position: absolute; pointer-events: none; display: none;
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    padding: 9px 12px; font-size: 12.5px; min-width: 170px; z-index: 3;
+  }
+  .tip .t { font-weight: 600; margin-bottom: 5px; font-variant-numeric: tabular-nums; }
+  .tip .r { display: flex; align-items: center; gap: 7px; color: var(--ink-2); font-variant-numeric: tabular-nums; padding: 1.5px 0; }
+  .tip .r .sw { width: 9px; height: 9px; border-radius: 2.5px; flex: none; }
+  .tip .r b { margin-left: auto; color: var(--ink); font-weight: 600; padding-left: 14px; }
+  details.tableview { margin: 6px 0 4px; font-family: var(--sans); font-size: 13px; }
+  details.tableview summary { cursor: pointer; color: var(--ink-3); font-size: 12.5px; padding: 6px 0; }
+  details.tableview summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  details.tableview table { border-collapse: collapse; width: 100%; }
+  details.tableview th, details.tableview td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
+  details.tableview th:first-child, details.tableview td:first-child { text-align: left; }
+  details.tableview th { color: var(--ink-3); font-weight: 600; font-size: 11.5px; }
+
+  ul.tight { margin: 0 0 18px; padding-left: 22px; }
+  ul.tight li { margin-bottom: 9px; }
+  ul.tight li::marker { color: var(--accent); }
+
+  .verdict {
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+    padding: 22px 26px; margin: 34px 0;
+  }
+  .verdict .kicker { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-ink); margin-bottom: 10px; }
+  .verdict ol { margin: 0; padding-left: 20px; font-size: 15.5px; }
+  .verdict li { margin-bottom: 10px; }
+  .verdict li::marker { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+
+  footer.end {
+    margin-top: 80px; padding-top: 20px; border-top: 1px solid var(--hairline);
+    font-family: var(--mono); font-size: 12px; color: var(--ink-3); line-height: 1.8;
+  }
+</style>
+
+<header class="masthead">
+  <div class="col">
+    <p class="eyebrow"><b>Engineering design review</b> · Small-software cloud · Part 2 of the brainstorm</p>
+    <h1>Fencing the Sleeping Cloud</h1>
+    <p class="subtitle">A pressure test of the single-writer fencing protocol across snapshot/restore boundaries, and a unit-economics model with explicit load assumptions you can drag.</p>
+    <svg class="epochrule" viewBox="0 0 960 36" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <line x1="0" y1="22" x2="960" y2="22" stroke="var(--hairline)" stroke-width="1.5"/>
+      <g stroke="var(--baseline)" stroke-width="1.5">
+        <line x1="60" y1="16" x2="60" y2="28"/><line x1="240" y1="16" x2="240" y2="28"/>
+        <line x1="420" y1="16" x2="420" y2="28"/><line x1="600" y1="16" x2="600" y2="28"/>
+        <line x1="780" y1="16" x2="780" y2="28"/>
+      </g>
+      <line x1="600" y1="22" x2="780" y2="22" stroke="var(--accent)" stroke-width="3"/>
+      <circle cx="780" cy="22" r="4" fill="var(--accent)"/>
+      <g fill="var(--ink-3)" font-family="ui-monospace, Menlo, monospace" font-size="10">
+        <text x="52" y="10">e41</text><text x="232" y="10">e42</text><text x="412" y="10">e43</text>
+        <text x="592" y="10">e44</text><text x="772" y="10" fill="var(--accent-ink)">e45 · active</text>
+      </g>
+    </svg>
+    <div class="docmeta">
+      <span>prepared 2026-07-22</span>
+      <span>status: pressure test — design moved in seven places</span>
+      <span>rev 2: PT-9 added — found by the model checker</span>
+      <span>model: interactive, assumptions editable</span>
+    </div>
+    <nav class="toc" aria-label="Contents">
+      <a href="#part1"><span class="n">I</span>The protocol</a>
+      <a href="#sm"><span class="n">I.4</span>State machine</a>
+      <a href="#part2"><span class="n">II</span>Nine pressure tests</a>
+      <a href="#part3"><span class="n">III</span>Unit economics</a>
+      <a href="#calc"><span class="n">III.2</span>The model</a>
+      <a href="#breaks"><span class="n">III.5</span>Where it breaks</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ==================== PART I ==================== -->
+<section id="part1">
+  <div class="col part-head">
+    <p class="eyebrow">Part I</p>
+    <h2>The fencing protocol</h2>
+    <p class="part-lede">Context: one Firecracker microVM per app, one SQLite file per app, scale-to-zero via memory snapshots, WAL shipped to object storage. The correctness problem is single-writer enforcement when the writer can be <em>paused for a month</em> and resumed believing no time has passed.</p>
+    <div class="rule"></div>
+  </div>
+
+  <div class="col">
+    <h3>1.1 Components and the trust boundary</h3>
+    <p>Five parties touch an app's write path: the <strong>guest VM</strong> (agent-written code plus SQLite — untrusted), the <strong>host agent</strong> (one per machine; owns VM lifecycle, trusted), the <strong>cell control plane</strong> (lease table in a linearizable store), the <strong>storage gateway</strong> (the WAL sink, replicated per cell), and the <strong>edge router</strong> (routes requests to the current holder).</p>
+
+    <div class="callout">
+      <p class="kicker">Load-bearing decision № 1</p>
+      <p><strong>WAL shipping runs in the host agent, not the guest.</strong> The guest writes SQLite to a local block device served by the host; the host agent tails the WAL from outside the VM, stamps each segment with the epoch <em>it</em> holds, and ships it. A Litestream-style shipper inside the guest would put epoch stamping in untrusted hands — the guest is agent-generated code, and fencing that depends on guest cooperation is not fencing. Guest cooperation may be a performance optimization; it is never a safety mechanism.</p>
+    </div>
+
+    <h3>1.2 The durability contract</h3>
+    <ol class="rules">
+      <li><span class="tag">D1</span><span>A write is acknowledged to the app only when its WAL frames are acked by the storage gateway under the current epoch. Group commit, synchronous in-region — this costs 1–5&nbsp;ms of write latency, and Pressure Test 1 shows why it is not optional.</span></li>
+      <li><span class="tag">D2</span><span>Local NVMe inside or under the VM is a cache. It never counts toward durability.</span></li>
+      <li><span class="tag">D3</span><span>Gateway → object storage replication is asynchronous. Region loss costs seconds of writes (documented RPO); host loss costs zero.</span></li>
+      <li><span class="tag">D4</span><span>Point-in-time restore never rewrites history. "Roll the database back to 3&nbsp;pm" creates a new lineage that references the old stream as a prefix — a branch, in git terms (see PT-8).</span></li>
+    </ol>
+
+    <h3>1.3 Epoch rules</h3>
+    <p>The epoch is the fencing token. Six rules define it completely:</p>
+    <ol class="rules">
+      <li><span class="tag">E1</span><span>Epoch <code>e</code> is a 64-bit value: <code>cell_generation ‖ counter</code>, compared as one integer. It is incremented by a compare-and-swap in the cell's linearizable store on every lease acquisition. The cell-generation prefix means a cell-ownership transfer fences every app in the cell at once — this closes the directory-layer split-brain (PT-4's ugly cousin).</span></li>
+      <li><span class="tag">E2</span><span>Every externally visible effect carries its epoch: WAL segments, snapshot manifests, router advertisements, cron-run ledger entries. No effect is unstamped.</span></li>
+      <li><span class="tag">E3</span><span>The gateway accepts a WAL append iff <code>segment.epoch == stream.current</code>, or <code>segment.epoch &gt; stream.current</code> after first writing a <code>SEAL</code> record that terminates the old epoch's suffix. Anything lower is rejected, and rejection is a signal to the pushing host agent to kill its instance.</span></li>
+      <li><span class="tag">E4</span><span>The stream manifest lives in object storage, and every mutation is a conditional PUT (compare-and-swap on manifest generation). The object store — not the gateway — is the arbiter of record. Gateways are caches of it.</span></li>
+      <li><span class="tag">E5</span><span>Snapshot manifests carry <code>(epoch, LSN, checkpoint_id)</code>, and <strong>registration is itself fenced</strong>: the control plane rejects a manifest whose epoch is below current. Unregistered snapshots are garbage. This rule is the non-obvious one — see PT-2.</span></li>
+      <li><span class="tag">E6</span><span>A resuming instance must, in order: acquire a fresh lease (new epoch <code>e′</code>) → replay the WAL delta from its snapshot's LSN to the stream head into its SQLite file → open the gate. No guest instruction with a network or disk effect executes before <code>e′</code> is held. The host agent enforces the ordering; the guest is never asked.</span></li>
+    </ol>
+
+    <div class="callout">
+      <p class="kicker">The one-line theory of the design</p>
+      <p><strong>Leases route traffic; epochs protect data.</strong> The lease is an optimization that makes the common case fast and keeps two instances from running concurrently <em>most</em> of the time. It is allowed to be wrong — during partitions, pauses, and clock trouble it <em>will</em> be wrong. The epoch checks at the gateway, the manifest store, and the control plane are the correctness mechanism, and they are never skipped, cached past a write, or delegated to the guest.</p>
+    </div>
+  </div>
+
+  <div class="wide" id="sm">
+    <h3 style="max-width:66ch;margin-left:auto;margin-right:auto;">1.4 The instance state machine</h3>
+    <div class="diagram">
+      <pre class="mermaid">
+stateDiagram-v2
+    [*] --> FROZEN: deploy registers first snapshot manifest
+    FROZEN --> WAKING: request or cron fires, router holds the request
+    WAKING --> REHYDRATING: lease CAS wins, epoch becomes e+1
+    WAKING --> DISCARDED: lease CAS loses to another waker
+    REHYDRATING --> ACTIVE: WAL delta replayed to head, gate opens
+    ACTIVE --> SEALING: idle timeout reached
+    ACTIVE --> LAME_DUCK: heartbeat renewal fails or migration ordered
+    LAME_DUCK --> SEALING: gateway reachable, flush and seal at e
+    LAME_DUCK --> SUSPECT: TTL expires while partitioned
+    SEALING --> FROZEN: checkpoint SQLite, snapshot memory, fenced manifest CAS, release lease
+    SEALING --> DISCARDED: manifest CAS rejected, epoch stale
+    SUSPECT --> DISCARDED: reconnects, learns epoch is stale, kills instance
+    DISCARDED --> [*]
+    note right of ACTIVE : host agent heartbeats the lease and ships WAL stamped with e
+    note right of SUSPECT : zombie. router ignores it, gateway rejects it, effects are inert
+      </pre>
+      <p class="cap">Per-instance lifecycle. The app itself is the lease lineage — instances are ephemeral bodies it inhabits. Every transition that crosses the dotted trust line (snapshot registration, WAL append, lease acquisition) is individually fenced; the state machine describes the happy paths between fences.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table class="doc">
+        <thead><tr><th>State</th><th>Holds lease</th><th>What runs</th><th>Cost while here</th><th>Typical dwell</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">FROZEN</td><td>No — none exists</td><td>Nothing. Snapshot + WAL in object storage</td><td>Storage bytes only (~⅓¢/mo)</td><td>Hours to months — where 95% of apps live</td></tr>
+          <tr><td class="mono">WAKING</td><td>Contending</td><td>Lease CAS in flight; snapshot prefetch may start (no effects allowed)</td><td>One CAS + a read</td><td class="num">5–20 ms</td></tr>
+          <tr><td class="mono">REHYDRATING</td><td>Yes, at e′</td><td>mmap snapshot, lazy page-in, WAL delta replay; guest still paused</td><td>NVMe/network reads</td><td class="num">50–300 ms warm, 1–3 s cold</td></tr>
+          <tr><td class="mono">ACTIVE</td><td>Yes, renewing</td><td>Guest serves; host tails and ships WAL</td><td>RAM + CPU — the expensive state</td><td class="num">minutes</td></tr>
+          <tr><td class="mono">LAME_DUCK</td><td>Expiring</td><td>No new writes accepted; flush and attempt seal</td><td>RAM</td><td class="num">&lt; 1 TTL</td></tr>
+          <tr><td class="mono">SEALING</td><td>Yes, releasing</td><td>SQLite checkpoint → memory snapshot → fenced manifest CAS</td><td>NVMe write burst</td><td class="num">1–10 s</td></tr>
+          <tr><td class="mono">SUSPECT</td><td><b>Believes yes</b></td><td>A zombie. May compute; every effect is fenced out downstream</td><td>Wasted RAM until reaped</td><td class="num">≤ partition length</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="col">
+    <h3>1.5 Invariants — and how I'd actually test them</h3>
+    <ol class="rules">
+      <li><span class="tag">I1</span><span><strong>Single writer.</strong> For any app, WAL segments accepted under epoch <code>e</code> are never interleaved with segments from <code>e′ &lt; e</code> after the seal of <code>e′</code>.</span></li>
+      <li><span class="tag">I2</span><span><strong>No lost ack.</strong> Every client-acknowledged write is in the sealed prefix visible to the next epoch's replay.</span></li>
+      <li><span class="tag">I3</span><span><strong>Snapshot lineage.</strong> Every registered snapshot's <code>(epoch, LSN)</code> lies on the accepted WAL history — no snapshot ever forks it.</span></li>
+      <li><span class="tag">I4</span><span><strong>Monotonic wake.</strong> A resumed instance produces no externally visible effect under its pre-pause epoch.</span></li>
+    </ol>
+    <p>This state space is small — one app, two or three host agents, a gateway, a manifest store — and the <strong>TLA+ spec now exists</strong> (<code>FencingProtocol.tla</code>). TLC checks I1–I4 across 26,618 reachable states and passes; re-run with each fence disabled in turn, it reproduces PT-1 and the stale-restore bug as counterexample traces — and produced one scenario the hand-written pressure tests below had missed entirely (<strong>PT-9, the slow waker</strong>). The next layers of assurance: a <strong>deterministic simulation harness</strong> (FoundationDB style) running the real code with fault injection at every await point, where the injector's pause primitive is first-class — because on this platform, <em>pause is not a fault, it's the product</em> — and Jepsen-style partition tests on a real cluster last, mostly confirming what the simulator already found.</p>
+  </div>
+</section>
+
+<!-- ==================== PART II ==================== -->
+<section id="part2">
+  <div class="col part-head">
+    <p class="eyebrow">Part II</p>
+    <h2>Nine ways to kill it — the pressure test</h2>
+    <p class="part-lede">Each scenario: what happens, what a naive design does, what this protocol does, and what risk honestly remains. Severity is the blast radius of getting it wrong: <span class="sev crit" style="font-size:11px;"><span class="g">▲</span>critical</span> = silent data corruption or loss, <span class="sev serious" style="font-size:11px;"><span class="g">◆</span>serious</span> = recoverable damage or lineage confusion, <span class="sev watch" style="font-size:11px;"><span class="g">●</span>watch</span> = bounded, documented weirdness. Scenarios one through eight were written by hand; the ninth was produced by the model checker after the fact — which is its own finding about hand-written pressure tests.</p>
+    <div class="rule"></div>
+  </div>
+
+  <div class="wide">
+
+    <article class="pt serious">
+      <header><span class="ptid">PT-1</span><h3>The partition zombie</h3><span class="sev serious"><span class="g">◆</span>Serious</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>Host H1 runs app instance A at epoch 5. H1 partitions from the control plane and gateway. The lease TTL expires; the router flips; instance B wakes on H2 at epoch 6, seals the stream, replays, serves.</div>
+        <div class="cell"><span class="lbl">Naive failure</span>H1 heals. A, believing it holds the lease, pushes its buffered WAL. An unfenced sink appends it — interleaving epoch-5 writes into an epoch-6 stream. Corruption nobody notices for weeks.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span>Gateway rejects the push (<b>E3</b>: 5 &lt; 6, stream sealed). Rejection instructs H1's host agent to kill A and discard local state. Crucially, under <b>D1</b> A could not have <em>acked</em> any write after the partition began — the gateway was unreachable — so no acknowledged write is lost. Async shipping would break exactly this promise, which is why sync-in-region is the default.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>A served stale <em>reads</em> during the partition window — bounded by the TTL. See PT-6.</div>
+      </div>
+    </article>
+
+    <article class="pt crit">
+      <header><span class="ptid">PT-2</span><h3>Zombie snapshot resurrection</h3><span class="sev crit"><span class="g">▲</span>Critical</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>A is mid-snapshot on an overloaded host — slow NVMe, the pause is taking 40 seconds — when its lease expires. B takes over at epoch 6 and writes 150 new WAL entries. A's snapshot then <em>finishes</em>, with DB state at epoch 5, LSN 100.</div>
+        <div class="cell"><span class="lbl">Naive failure</span>The snapshot gets registered — it has the <em>newest wall-clock timestamp</em>, so the next wake restores it. Users see the database jump backward in time; new writes fork the lineage from LSN 100. This is the nastiest scenario in the design because every individual step looks locally reasonable.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span>Two independent fences. First, registration is a fenced CAS (<b>E5</b>): epoch 5 &lt; current 6 → rejected, snapshot garbage-collected. Second, even a stale manifest that somehow lingered is harmless, because restore (<b>E6</b>) always replays the WAL delta from the snapshot's LSN to head — which requires the snapshot's SQLite to sit at an exact checkpoint boundary. That is why <code>SEALING</code> checkpoints <em>before</em> snapshotting memory, not after.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>None to data <em>content</em>. But the claim that a stale manifest is otherwise harmless was too strong: PT-9 — found later by the model checker — shows the manifest's lineage <em>metadata</em> has its own failure mode, and E5 is the only fence that catches it.</div>
+      </div>
+      <div class="diagram" style="margin:0 20px 20px;">
+        <pre class="mermaid">
+sequenceDiagram
+    participant A as Host agent A (epoch 5)
+    participant CP as Control plane
+    participant B as Host agent B
+    participant GW as Storage gateway
+    A->>A: pause guest, begin snapshot write (slow disk)
+    Note over A,CP: lease TTL expires mid-snapshot
+    B->>CP: wake request, lease CAS
+    CP-->>B: granted, epoch 6
+    B->>GW: seal stream at epoch 5, append at epoch 6
+    GW-->>B: manifest CAS ok, epoch 6 current
+    A->>CP: register snapshot manifest (epoch 5, LSN 100)
+    CP-->>A: rejected, current epoch is 6
+    A->>A: discard snapshot, destroy instance
+    Note over B,GW: lineage continues from the sealed prefix. no fork
+        </pre>
+        <p class="cap">PT-2 resolved: the snapshot that finished last loses to the epoch that was granted last. Wall-clock recency is never trusted anywhere in the protocol.</p>
+      </div>
+    </article>
+
+    <article class="pt crit">
+      <header><span class="ptid">PT-3</span><h3>Paused clocks — the platform's defining hazard</h3><span class="sev crit"><span class="g">▲</span>Critical</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>The classic distributed-systems bug: a lease holder checks "valid until T," then stalls (GC, kernel hiccup), then acts after expiry. On a normal platform that's a rare race. Here, <b>arbitrary pause is the normal operating mode</b> — a VM can freeze mid-request and resume three weeks later with a valid-lease belief intact in its memory image.</div>
+        <div class="cell"><span class="lbl">Naive failure</span>Any design where the lease timer lives inside the VM — or where resume trusts in-memory state at all — ships corrupted writes on literally every long suspend. This isn't a tail risk; it's the common case.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span>Leases are held by the <em>host agent on behalf of</em> the instance, never inside it, and every pause/resume boundary re-runs the lease CAS before the guest executes one post-resume instruction (<b>E6</b>). And because host agents can stall too, the lease is never the last line: every effect is individually fenced downstream (<b>E2–E5</b>). The lease can be wrong; the epoch check cannot be skipped.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>None if E6 ordering is enforced in the hypervisor control path. This invariant (<b>I4</b>) is the one to model-check hardest and the reason the TLA+ spec must include pause as a first-class action.</div>
+      </div>
+    </article>
+
+    <article class="pt serious">
+      <header><span class="ptid">PT-4</span><h3>Storage gateway split brain</h3><span class="sev serious"><span class="g">◆</span>Serious</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>The gateway is replicated per cell. Two replicas hold divergent views of an app's current epoch — one missed the seal.</div>
+        <div class="cell"><span class="lbl">Naive failure</span>Each replica appends what it believes is valid; the object-storage stream interleaves two epochs. Fencing at a component that is itself unfenced is no fencing at all.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span>Gateway epoch state is cache only (<b>E4</b>). The authoritative act is a conditional PUT against the stream manifest in object storage — compare-and-swap on manifest generation. S3-class conditional writes make the object store the single serialization point; a confused gateway's append simply fails its precondition. Throughput is a non-issue by construction: small software is low-QPS per app, and frames group into ~1&nbsp;MB or 1-second segments.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>Manifest CAS adds one object-store round trip per segment (~10–20 ms, hidden behind group commit). Object-store conditional-write semantics become a hard vendor requirement.</div>
+      </div>
+    </article>
+
+    <article class="pt watch">
+      <header><span class="ptid">PT-5</span><h3>Dueling wakers</h3><span class="sev watch"><span class="g">●</span>Watch</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>Two requests hit two edge nodes simultaneously for a frozen app. Both trigger wakes; two host agents race to restore.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span>The cell scheduler coalesces wake requests by app id, but coalescing is best-effort — correctness comes from the lease CAS alone: exactly one contender gets epoch e+1; the loser aborts its prefetch and the router converges on the winner.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>An occasionally wasted snapshot fetch. Accepted; optimizing it below ~1% of wakes isn't worth complexity.</div>
+      </div>
+    </article>
+
+    <article class="pt watch">
+      <header><span class="ptid">PT-6</span><h3>Stale reads from the routed-around zombie</h3><span class="sev watch"><span class="g">●</span>Watch</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>Fencing protects writes. A zombie holding an in-flight or long-poll connection can still <em>answer reads</em> with pre-failover data — someone updates the on-call roster via B while a colleague's open tab reads stale from A.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span>Two bounds. The router consults the lease on every new connection, so new reads never reach a zombie. Existing connections are bounded by <b>staleness ≤ lease TTL + max clock skew</b> (~20 s at a 15 s TTL). For a five-user tool this is honest and acceptable — document it rather than hide it. A strict mode (reads revalidate epoch at the gateway, +1 RTT each) exists for the rare app that needs linearizable reads.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>The documented window itself. The TTL becomes a product knob: shorter TTL → smaller window, more control-plane heartbeat load, more spurious failovers.</div>
+      </div>
+    </article>
+
+    <article class="pt watch">
+      <header><span class="ptid">PT-7</span><h3>Cron double-fire</h3><span class="sev watch"><span class="g">●</span>Watch</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>Scheduler wakes an app for a cron job; the job runs, sends an email, and the completion ack is lost. At-least-once delivery retries; the lease prevents <em>concurrent</em> instances, but nothing prevents a <em>sequential</em> re-run.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span>Fencing cannot fix external side effects — exactly-once I/O to the outside world doesn't exist. Instead the platform provides idempotency as a primitive: a job-run ledger keyed <code>(app, job, scheduled_time)</code> living in the app's own WAL-backed state (so it inherits I1–I2), and platform egress APIs (email, webhooks) that accept dedupe keys.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>Agent-written code that bypasses platform egress APIs loses the guarantee. Mitigation is the egress proxy: raw outbound effects are already gated for security reasons, so the idempotent path is also the easy path.</div>
+      </div>
+    </article>
+
+    <article class="pt serious">
+      <header><span class="ptid">PT-8</span><h3>Time-travel restore vs. the lineage</h3><span class="sev serious"><span class="g">◆</span>Serious</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>A user says "roll the database back to 3 pm" after their agent's migration ate a column. Naively you truncate the WAL to 3 pm and resume — but replicas of the truncated suffix exist (snapshots, caches, the gateway), and a future PT-2-style race can resurrect them into a stream that now claims those LSNs never happened.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span><b>D4</b>: restore is a branch, never a rewrite. It bumps the epoch and opens a new stream whose manifest references the old one up to the restore LSN as an immutable prefix. Old suffixes stay sealed under their epochs forever — inert, but present. Bonus: the branch model <em>is</em> the product's revision-history feature; undo, audit, and "what did this look like Tuesday" fall out of the correctness design for free.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>Storage growth from retained suffixes — bounded by the PITR retention window (priced into Part III at 1.4×).</div>
+      </div>
+    </article>
+
+    <article class="pt crit">
+      <header><span class="ptid">PT-9</span><h3>The slow waker — found by the model checker, not by this review</h3><span class="sev crit"><span class="g">▲</span>Critical</span></header>
+      <div class="body">
+        <div class="cell"><span class="lbl">Setup</span>A host acquires the lease at epoch <code>e</code>, then stalls <em>before rehydrating</em> — a host-agent hiccup on an overloaded machine. The TTL expires; a successor takes epoch <code>e+1</code>, seals, and writes. The stalled waker then finishes its rehydration — replaying the <em>successor's</em> writes into its own state — goes active, idles out, and registers a snapshot manifest stamped epoch <code>e</code> whose prefix contains epoch-<code>e+1</code> data.</div>
+        <div class="cell"><span class="lbl">Naive failure</span>The manifest lies about lineage. The data content is coincidentally correct; the ancestry is forged. PITR branching (D4) and garbage collection both trust manifest epochs, so a forged ancestor can orphan live suffixes or attach a branch to the wrong history — silent data loss, one hop removed. And the gateway fence never fires, because the slow waker never appends a single WAL segment.</div>
+        <div class="cell"><span class="lbl">Protocol's answer</span><b>E5, and only E5.</b> The registration CAS rejects epoch <code>e</code> against current <code>e+1</code>; the instance dies. This retires the idea that fenced registration is defense-in-depth — on this path it is the sole fence. Implementations should additionally make the takeover seal a fenced gateway <em>write</em>, so a stale waker dies at rehydrate via E3's reject clause — belt and suspenders, but E5 is the one guaranteed to be there.</div>
+        <div class="cell"><span class="lbl">Residual risk</span>None with E5 enforced. Provenance: TLC produced this trace within seconds of switching registration fencing off in <code>FencingProtocol.tla</code> — after a human review had predicted that configuration was safe. The eight scenarios above were all written by hand and all missed it; that asymmetry is the argument for keeping the spec alive as the protocol evolves.</div>
+      </div>
+    </article>
+
+    <div class="verdict">
+      <p class="kicker">What the pressure test changed — seven design commitments</p>
+      <ol>
+        <li><strong>WAL shipping moved out of the guest into the host agent.</strong> Epoch stamping can't live in untrusted, agent-generated code (§1.1).</li>
+        <li><strong>Leases route; epochs protect.</strong> The lease was demoted to an optimization — every effect is individually fenced downstream, because on this platform pause is the product, not a fault (PT-3).</li>
+        <li><strong>Snapshot registration is fenced</strong> — the non-obvious rule. Without E5, PT-2 silently forks user data, and wall-clock recency would pick the wrong snapshot every time. The model checker later hardened this from "non-obvious" to "load-bearing": on the slow-waker path (PT-9), E5 is the <em>only</em> fence.</li>
+        <li><strong>Sync in-region WAL shipping is the default,</strong> not a paranoid option: it is what makes PT-1 lose zero acknowledged writes. 1–5 ms of write latency buys the durability contract.</li>
+        <li><strong>SQLite checkpoints before memory snapshots,</strong> so every snapshot sits on a replayable WAL boundary (PT-2's second fence).</li>
+        <li><strong>Point-in-time restore is branching, never truncation</strong> — and doubles as the revision-history feature (PT-8).</li>
+        <li><strong>The takeover seal must be a fenced gateway write, never elided as redundant with the lease.</strong> The slow waker (PT-9) is exactly what slips through when an implementation reasons "we just acquired the lease, skip the seal round-trip."</li>
+      </ol>
+    </div>
+
+    <h3 style="max-width:66ch;margin-left:auto;margin-right:auto;">Open trade-offs — the knobs, priced</h3>
+    <div class="tablewrap">
+      <table class="doc">
+        <thead><tr><th>Decision</th><th>Chosen default</th><th>What it buys</th><th>What it costs</th></tr></thead>
+        <tbody>
+          <tr><td>Lease TTL / heartbeat</td><td class="mono">15 s / 5 s</td><td>Stale-read window ≤ ~20 s; failover in seconds</td><td>Heartbeat QPS on the control plane scales with awake VMs; shorter TTLs amplify spurious failovers on host hiccups</td></tr>
+          <tr><td>WAL ship mode</td><td class="mono">sync in-region</td><td>Zero acked-write loss on any single failure (PT-1)</td><td>+1–5 ms per write; async remains an opt-in for throwaway apps</td></tr>
+          <tr><td>WAL shipper location</td><td class="mono">host agent</td><td>Fencing enforceable against untrusted guests</td><td>Platform owns the block-device data path; guest filesystem choices constrained</td></tr>
+          <tr><td>Epoch shape</td><td class="mono">cell_gen ‖ counter</td><td>Cell failover fences a whole cell atomically</td><td>Every comparison must be on the composite; a bare-counter comparison anywhere is a latent split-brain</td></tr>
+          <tr><td>Read fencing</td><td class="mono">router-level, bounded</td><td>No per-read latency tax</td><td>Documented ≤ TTL staleness during failover; strict mode costs +1 RTT/read</td></tr>
+          <tr><td>Snapshot trigger</td><td class="mono">idle timeout + predictor</td><td>RAM freed early; calendar-aware pre-warm kills Monday-9am cold starts</td><td>Churn: snapshot I/O for apps that wake right back up; predictor is a real ML-ish component to own</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== PART III ==================== -->
+<section id="part3" class="viz-root">
+  <div class="col part-head">
+    <p class="eyebrow">Part III</p>
+    <h2>Unit economics, with the assumptions on the table</h2>
+    <p class="part-lede">The claim from the brainstorm was that an idle app must cost about a cent a month for the business to work. Here is the model behind that claim — cohort-based load assumptions, a live calculator, and the sensitivity analysis showing where it breaks.</p>
+    <div class="rule"></div>
+  </div>
+
+  <div class="col">
+    <h3>3.1 The load model</h3>
+    <p>Small software's traffic is human-paced and bursty. Rather than one made-up average, the model uses three cohorts. An app is "awake" from first request until a 5-minute idle timeout; session lengths below include that trailing window.</p>
+  </div>
+
+  <div class="wide">
+    <div class="tablewrap">
+      <table class="doc">
+        <thead><tr><th>Cohort</th><th>Share</th><th>Usage pattern</th><th>Awake time</th><th>Duty cycle</th></tr></thead>
+        <tbody>
+          <tr><td>Hot</td><td class="num">3%</td><td>Team dashboards and trackers in daily use — ~8 wake-sessions per weekday × 12 min</td><td class="num">~96 min/weekday</td><td class="num">≈ 4.8% blended</td></tr>
+          <tr><td>Warm</td><td class="num">22%</td><td>Weekly tools, prototypes being iterated — ~1.5 sessions/day × 9 min</td><td class="num">~13 min/day</td><td class="num">≈ 0.9%</td></tr>
+          <tr><td>Dormant</td><td class="num">75%</td><td>Finished experiments, seasonal tools — ~1 wake per two weeks, plus stray cron</td><td class="num">~8 min/fortnight</td><td class="num">≈ 0.04%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="foot" style="max-width:66ch;margin:10px auto 0;">Blended: 0.03 × 4.8% + 0.22 × 0.9% + 0.75 × 0.04% ≈ <strong>0.4% duty cycle</strong> — the model's default, and a single slider below so you can disagree with it. The peak factor captures the correlation problem: wakes cluster at 9 am Monday because small software is synchronized to human work rhythms, so peak concurrency is taken as peak-factor × mean, plus 25% headroom.</p>
+  </div>
+
+  <div class="wide" id="calc">
+    <div class="panel">
+      <h3>3.2 The model — drag the assumptions</h3>
+      <div class="sliders">
+        <div class="sl">
+          <label for="sN"><span>Apps on the platform</span><span class="val" id="vN"></span></label>
+          <input type="range" id="sN" min="0" max="1000" step="1" aria-label="Total apps on the platform">
+        </div>
+        <div class="sl">
+          <label for="sDuty"><span>Blended duty cycle</span><span class="val" id="vDuty"></span></label>
+          <input type="range" id="sDuty" min="0" max="1000" step="1" aria-label="Blended duty cycle percent">
+        </div>
+        <div class="sl">
+          <label for="sRam"><span>RAM per awake app</span><span class="val" id="vRam"></span></label>
+          <input type="range" id="sRam" min="128" max="1024" step="32" aria-label="RAM per awake app in megabytes">
+        </div>
+        <div class="sl">
+          <label for="sPeak"><span>Monday-peak wake factor</span><span class="val" id="vPeak"></span></label>
+          <input type="range" id="sPeak" min="2" max="15" step="0.5" aria-label="Peak to mean wake factor">
+        </div>
+        <div class="sl">
+          <label for="sFoot"><span>Stored bytes per app <span style="color:var(--ink-3)">(snapshot after dedupe + DB)</span></span><span class="val" id="vFoot"></span></label>
+          <input type="range" id="sFoot" min="50" max="2000" step="10" aria-label="Stored megabytes per app">
+        </div>
+        <div class="sl">
+          <label for="sHost"><span>Host cost <span style="color:var(--ink-3)">(512 GB · 48 c · 7.7 TB NVMe)</span></span><span class="val" id="vHost"></span></label>
+          <input type="range" id="sHost" min="250" max="900" step="10" aria-label="Bare metal host monthly cost in dollars">
+        </div>
+        <div class="sl">
+          <label for="sStor"><span>Object storage</span><span class="val" id="vStor"></span></label>
+          <input type="range" id="sStor" min="5" max="25" step="0.5" aria-label="Object storage dollars per terabyte month">
+        </div>
+      </div>
+
+      <div class="tiles">
+        <div class="tile hero"><div class="v" id="tTotal"></div><div class="l">Total infra / month</div></div>
+        <div class="tile"><div class="v" id="tPerApp"></div><div class="l">Blended cost / app / mo</div></div>
+        <div class="tile"><div class="v" id="tIdle"></div><div class="l">Idle app / mo (storage only)</div></div>
+        <div class="tile"><div class="v" id="tHosts"></div><div class="l">Hosts at Monday peak</div></div>
+        <div class="tile"><div class="v" id="tRatio"></div><div class="l">Cheaper than always-resident</div></div>
+        <div class="tile"><div class="v" id="tCogs"></div><div class="l">Infra as % of revenue *</div></div>
+      </div>
+
+      <div class="breakdown" id="bkd">
+        <div class="brow"><span class="lbl">Compute fleet</span><span class="track"><span class="fill" id="bCompute" style="background:var(--ord-3)"></span></span><span class="num" id="nCompute"></span></div>
+        <div class="brow"><span class="lbl">Edge, control plane &amp; ops</span><span class="track"><span class="fill" id="bOver" style="background:var(--ord-2)"></span></span><span class="num" id="nOver"></span></div>
+        <div class="brow"><span class="lbl">Snapshot + DB storage</span><span class="track"><span class="fill" id="bStor" style="background:var(--ord-1)"></span></span><span class="num" id="nStor"></span></div>
+      </div>
+
+      <p class="constants">fixed: 80% RAM bin-packing target · +25% wake headroom · 1.4× PITR retention multiplier · overhead = 25% of (compute+storage) + $3k/mo floor · 3-host minimum · always-resident baseline reserves 256 MB/app · * revenue proxy: 30 apps/org at $40/org/mo</p>
+
+      <details class="tableview"><summary>Show the arithmetic</summary>
+        <p style="font-family:var(--mono);font-size:12px;line-height:2;color:var(--ink-2);overflow-x:auto;">
+          awake_mean = N × duty<br>
+          awake_peak = awake_mean × peak_factor × 1.25<br>
+          hosts = max(3, ⌈awake_peak × RAM ÷ (512 GB × 0.80)⌉)<br>
+          compute = hosts × host_cost<br>
+          storage = N × stored_MB × 1.4 ÷ 10⁶ TB × $/TB<br>
+          overhead = 0.25 × (compute + storage) + $3,000<br>
+          always_resident = ⌈N × 256 MB ÷ (512 GB × 0.80)⌉ × host_cost, same overhead formula
+        </p>
+      </details>
+    </div>
+  </div>
+
+  <div class="wide">
+    <div class="chartcard">
+      <div class="ct">3.3 Monthly infrastructure cost vs. fleet size</div>
+      <div class="cs">Both axes log. The gap is the thesis: snapshot-based scale-to-zero vs. a naive 256 MB always-resident reservation per app, on identical hardware. Recomputed live from the sliders above.</div>
+      <div class="legend">
+        <span class="chip"><span class="sw" style="background:var(--series-1)"></span>Sleeping cloud (this design)</span>
+        <span class="chip"><span class="sw" style="background:var(--series-2)"></span>Always-resident baseline</span>
+      </div>
+      <div class="chart-wrap" id="chart1"></div>
+      <details class="tableview"><summary>View as table</summary><div id="table1"></div></details>
+    </div>
+
+    <div class="chartcard">
+      <div class="ct">3.4 Sensitivity — cost per app vs. duty cycle</div>
+      <div class="cs">The knee that defines the business. Below ~1% duty the sleeping cloud is 10–30× cheaper per app; the advantage decays as apps stay awake, crossing the always-resident line near 10% duty. Ring marks your current duty-cycle setting.</div>
+      <div class="legend">
+        <span class="chip"><span class="sw" style="background:var(--series-1)"></span>Sleeping cloud, per app</span>
+        <span class="chip"><span class="sw" style="background:var(--series-2)"></span>Always-resident, per app (duty-independent)</span>
+      </div>
+      <div class="chart-wrap" id="chart2"></div>
+      <details class="tableview"><summary>View as table</summary><div id="table2"></div></details>
+    </div>
+  </div>
+
+  <div class="col" id="breaks">
+    <h3>3.5 Where the model breaks</h3>
+    <ul class="tight">
+      <li><strong>Duty cycle drifting up.</strong> Past ~3–5% blended duty, RAM-seconds dominate and the scale-to-zero machinery buys little; near 10% you converge with always-resident (chart 3.4). Product implication: always-hot apps must be metered or priced separately — the free tier is free <em>because</em> it sleeps.</li>
+      <li><strong>The peak factor.</strong> At peak factor 6 the fleet is sized 7.5× above mean load. If correlated wakes push it to 12–15 (every standup dashboard, 9:00:00 sharp), the compute line roughly doubles. Jittered cron, wake-rate admission control, and calendar-aware pre-warming aren't nice-to-haves; they are margin.</li>
+      <li><strong>Snapshot bloat.</strong> Agents produce 1.5 GB <code>node_modules</code> without blinking. At face value that quadruples storage — the biggest line-item risk in the model. Content-addressed, chunk-deduplicated snapshots (most apps share base-image pages) are load-bearing and must be built early, not retrofitted. The 220 MB default assumes roughly 4× dedupe.</li>
+      <li><strong>Abuse eats the margin.</strong> The CPU assumptions hold only if cryptominers are evicted fast. Free arbitrary-code hosting attracts them on day one; detection and caps are part of COGS, not an afterthought.</li>
+      <li><strong>What the comparison is fair to.</strong> The always-resident baseline is the naive per-app reservation that incumbent-cloud pricing passes on to you. A tuned Kubernetes fleet with aggressive overcommit narrows the gap — but it cannot delete the idle-RAM floor, and it reintroduces exactly the operational complexity this cloud exists to delete.</li>
+    </ul>
+
+    <h3>3.6 Bottom line</h3>
+    <p>At the defaults — a million apps, 0.4% duty — the whole platform runs on <strong>about two dozen hosts for roughly $20k/month</strong>: two cents per app, a third of a cent for an idle one, about 17× cheaper than the naive architecture, and infrastructure COGS under 2% of even conservatively modeled revenue. The margin structure of a SaaS company with the workload of a hosting company — but only if the fencing protocol in Parts I–II holds, because the same snapshot machinery that creates the margin is what creates the zombies.</p>
+  </div>
+</section>
+
+<footer class="end">
+  <div class="col">
+    fencing-the-sleeping-cloud · design pressure test · 2026-07-22<br>
+    all figures recompute from the sliders in §3.2 — the prose quotes the defaults. charts are continuous approximations; the tiles round hosts up like the real world does.
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- parameters ----------
+  var P = { N: 1e6, duty: 0.004, ram: 320, peak: 6, foot: 220, host: 450, stor: 11 };
+  var HR = 1.25, UTIL = 0.8, HOSTMB = 524288, RET = 1.4, OH = 0.25, FLOOR = 3000;
+
+  function calc(N, duty, p, cont) {
+    var awakeMean = N * duty;
+    var awakePeak = awakeMean * p.peak * HR;
+    var hostsRaw = awakePeak * p.ram / (HOSTMB * UTIL);
+    var hosts = cont ? Math.max(3, hostsRaw) : Math.max(3, Math.ceil(hostsRaw));
+    var compute = hosts * p.host;
+    var storage = N * p.foot * RET / 1e6 * p.stor;
+    var overhead = OH * (compute + storage) + FLOOR;
+    var total = compute + storage + overhead;
+    var aoRaw = N * 256 / (HOSTMB * UTIL);
+    var aoHosts = cont ? Math.max(3, aoRaw) : Math.max(3, Math.ceil(aoRaw));
+    var aoCompute = aoHosts * p.host;
+    var aoStorage = N * 150 * RET / 1e6 * p.stor;
+    var aoTotal = (aoCompute + aoStorage) * (1 + OH) + FLOOR;
+    return { awakeMean: awakeMean, awakePeak: awakePeak, hosts: hosts, compute: compute,
+             storage: storage, overhead: overhead, total: total, aoTotal: aoTotal,
+             perApp: total / N, aoPerApp: aoTotal / N,
+             idle: p.foot * RET / 1e6 * p.stor };
+  }
+
+  // ---------- formatting ----------
+  function fmtMoney(v) {
+    if (v >= 1e6) return "$" + (v / 1e6).toFixed(v < 3e6 ? 2 : 1) + "M";
+    if (v >= 10000) return "$" + Math.round(v / 1000) + "k";
+    if (v >= 1000) return "$" + (v / 1000).toFixed(1) + "k";
+    return "$" + Math.round(v);
+  }
+  function fmtApps(v) {
+    if (v >= 1e6) return (v / 1e6) >= 10 ? Math.round(v / 1e6) + "M" : (v / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (v >= 1000) return Math.round(v / 1000) + "k";
+    return String(Math.round(v));
+  }
+  function fmtPerApp(v) {
+    if (v >= 0.095) return "$" + v.toFixed(2);
+    return (v * 100).toFixed(2) + "¢";
+  }
+  function fmtDuty(d) {
+    var pc = d * 100;
+    return (pc >= 1 ? pc.toFixed(1) : pc.toFixed(2)) + "%";
+  }
+
+  // ---------- sliders ----------
+  function logMap(lo, hi) {
+    return {
+      toVal: function (t) { return lo * Math.pow(hi / lo, t / 1000); },
+      toT: function (v) { return Math.round(1000 * Math.log(v / lo) / Math.log(hi / lo)); }
+    };
+  }
+  var mapN = logMap(1e4, 1e7), mapD = logMap(0.0005, 0.10);
+
+  var defs = [
+    { id: "sN", out: "vN", get: function () { return P.N; }, set: function (el) { P.N = mapN.toVal(+el.value); }, init: function (el) { el.value = mapN.toT(P.N); }, fmt: function () { return fmtApps(P.N) + " apps"; } },
+    { id: "sDuty", out: "vDuty", get: function () { return P.duty; }, set: function (el) { P.duty = mapD.toVal(+el.value); }, init: function (el) { el.value = mapD.toT(P.duty); }, fmt: function () { return fmtDuty(P.duty); } },
+    { id: "sRam", out: "vRam", set: function (el) { P.ram = +el.value; }, init: function (el) { el.value = P.ram; }, fmt: function () { return P.ram + " MB"; } },
+    { id: "sPeak", out: "vPeak", set: function (el) { P.peak = +el.value; }, init: function (el) { el.value = P.peak; }, fmt: function () { return P.peak + "× mean"; } },
+    { id: "sFoot", out: "vFoot", set: function (el) { P.foot = +el.value; }, init: function (el) { el.value = P.foot; }, fmt: function () { return P.foot + " MB"; } },
+    { id: "sHost", out: "vHost", set: function (el) { P.host = +el.value; }, init: function (el) { el.value = P.host; }, fmt: function () { return "$" + P.host + "/mo"; } },
+    { id: "sStor", out: "vStor", set: function (el) { P.stor = +el.value; }, init: function (el) { el.value = P.stor; }, fmt: function () { return "$" + P.stor.toFixed(1) + "/TB-mo"; } }
+  ];
+
+  defs.forEach(function (d) {
+    var el = document.getElementById(d.id);
+    d.init(el);
+    document.getElementById(d.out).textContent = d.fmt();
+    el.addEventListener("input", function () {
+      d.set(el);
+      document.getElementById(d.out).textContent = d.fmt();
+      recompute();
+    });
+  });
+
+  // ---------- tiles & breakdown ----------
+  function recompute() {
+    var m = calc(P.N, P.duty, P, false);
+    document.getElementById("tTotal").textContent = fmtMoney(m.total);
+    document.getElementById("tPerApp").textContent = fmtPerApp(m.perApp);
+    document.getElementById("tIdle").textContent = fmtPerApp(m.idle);
+    document.getElementById("tHosts").textContent = m.hosts.toLocaleString();
+    document.getElementById("tRatio").textContent = (m.aoTotal / m.total).toFixed(m.aoTotal / m.total >= 10 ? 0 : 1) + "×";
+    var revenue = P.N / 30 * 40;
+    var cogs = m.total / revenue * 100;
+    document.getElementById("tCogs").textContent = cogs >= 10 ? cogs.toFixed(0) + "%" : cogs.toFixed(1) + "%";
+
+    var parts = [
+      ["bCompute", "nCompute", m.compute],
+      ["bOver", "nOver", m.overhead],
+      ["bStor", "nStor", m.storage]
+    ];
+    parts.forEach(function (row) {
+      var pct = row[2] / m.total * 100;
+      document.getElementById(row[0]).style.width = Math.max(1.5, pct) + "%";
+      document.getElementById(row[1]).innerHTML = fmtMoney(row[2]) + " <span>· " + Math.round(pct) + "%</span>";
+    });
+
+    renderChart1();
+    renderChart2();
+  }
+
+  // ---------- generic log-log line chart ----------
+  function logspace(lo, hi, n) {
+    var out = [], i;
+    for (i = 0; i < n; i++) out.push(lo * Math.pow(hi / lo, i / (n - 1)));
+    return out;
+  }
+  function decadeTicks(lo, hi) {
+    var ticks = [], span = Math.log10(hi / lo);
+    var d0 = Math.ceil(Math.log10(lo) - 1e-9), d1 = Math.floor(Math.log10(hi) + 1e-9), d;
+    for (d = d0; d <= d1; d++) {
+      ticks.push(Math.pow(10, d));
+      if (span <= 2.3) {
+        if (2 * Math.pow(10, d) <= hi) ticks.push(2 * Math.pow(10, d));
+        if (5 * Math.pow(10, d) <= hi) ticks.push(5 * Math.pow(10, d));
+      }
+    }
+    return ticks.filter(function (t) { return t >= lo * 0.999 && t <= hi * 1.001; });
+  }
+
+  function renderLogChart(wrapId, cfg) {
+    var wrap = document.getElementById(wrapId);
+    var W = Math.max(320, wrap.clientWidth), H = 340;
+    var M = { l: 62, r: 18, t: 20, b: 42 };
+    var pw = W - M.l - M.r, ph = H - M.t - M.b;
+
+    var allY = [];
+    cfg.series.forEach(function (s) { s.pts.forEach(function (p) { allY.push(p.y); }); });
+    var yLo = Math.pow(10, Math.floor(Math.log10(Math.min.apply(null, allY))));
+    var yHi = Math.pow(10, Math.ceil(Math.log10(Math.max.apply(null, allY))));
+    var xLo = cfg.xLo, xHi = cfg.xHi;
+
+    function X(x) { return M.l + Math.log(x / xLo) / Math.log(xHi / xLo) * pw; }
+    function Y(y) { return M.t + ph - Math.log(y / yLo) / Math.log(yHi / yLo) * ph; }
+
+    var svgNS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", W); svg.setAttribute("height", H);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", cfg.aria);
+
+    function el(name, attrs, styles) {
+      var e = document.createElementNS(svgNS, name), k;
+      for (k in attrs) e.setAttribute(k, attrs[k]);
+      if (styles) for (k in styles) e.style[k] = styles[k];
+      return e;
+    }
+    function txt(x, y, str, anchor, size, weight) {
+      var t = el("text", { x: x, y: y, "text-anchor": anchor || "start", "font-size": size || 11 });
+      t.style.fill = "var(--ink-3)";
+      t.style.fontFamily = "system-ui, -apple-system, sans-serif";
+      t.style.fontVariantNumeric = "tabular-nums";
+      if (weight) t.style.fontWeight = weight;
+      t.textContent = str;
+      return t;
+    }
+
+    // grid + ticks
+    decadeTicks(yLo, yHi).forEach(function (tk) {
+      svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: Y(tk), y2: Y(tk) }, { stroke: "var(--grid)", strokeWidth: 1 }));
+      svg.appendChild(txt(M.l - 8, Y(tk) + 4, cfg.yFmt(tk), "end"));
+    });
+    decadeTicks(xLo, xHi).forEach(function (tk) {
+      if (Math.abs(Math.log10(tk) % 1) > 0.01) return; // label decades only on x
+      svg.appendChild(el("line", { x1: X(tk), x2: X(tk), y1: M.t, y2: M.t + ph }, { stroke: "var(--grid)", strokeWidth: 1 }));
+      svg.appendChild(txt(X(tk), H - M.b + 18, cfg.xFmt(tk), "middle"));
+    });
+    svg.appendChild(el("line", { x1: M.l, x2: W - M.r, y1: M.t + ph, y2: M.t + ph }, { stroke: "var(--baseline)", strokeWidth: 1 }));
+    svg.appendChild(txt(W - M.r, H - 6, cfg.xLabel, "end", 11));
+
+    // series
+    cfg.series.forEach(function (s) {
+      var dstr = s.pts.map(function (p, i) { return (i ? "L" : "M") + X(p.x).toFixed(1) + " " + Y(p.y).toFixed(1); }).join("");
+      var path = el("path", { d: dstr, fill: "none" }, { stroke: "var(" + s.color + ")", strokeWidth: 2 });
+      if (s.dash) path.style.strokeDasharray = "6 5";
+      svg.appendChild(path);
+      var last = s.pts[s.pts.length - 1];
+      var dot = el("circle", { cx: X(last.x), cy: Y(last.y), r: 3.5 }, { fill: "var(" + s.color + ")", stroke: "var(--surface)", strokeWidth: 2 });
+      svg.appendChild(dot);
+      var lab = txt(X(last.x) - 8, Y(last.y) + (s.labelDy || -10), s.name, "end", 12, 600);
+      lab.style.fill = "var(--ink-2)";
+      svg.appendChild(lab);
+    });
+
+    // marker (current setting)
+    if (cfg.marker) {
+      svg.appendChild(el("circle", { cx: X(cfg.marker.x), cy: Y(cfg.marker.y), r: 5.5 }, { fill: "none", stroke: "var(--series-1)", strokeWidth: 2 }));
+      var mlab = txt(X(cfg.marker.x), Y(cfg.marker.y) - 12, "current setting", "middle", 10.5);
+      svg.appendChild(mlab);
+    }
+
+    // hover layer
+    var vline = el("line", { x1: 0, x2: 0, y1: M.t, y2: M.t + ph }, { stroke: "var(--baseline)", strokeWidth: 1, strokeDasharray: "3 3", display: "none" });
+    svg.appendChild(vline);
+    var overlay = el("rect", { x: M.l, y: M.t, width: pw, height: ph, fill: "transparent" });
+    svg.appendChild(overlay);
+
+    var tip = wrap.querySelector(".tip");
+    if (!tip) { tip = document.createElement("div"); tip.className = "tip"; wrap.appendChild(tip); }
+
+    overlay.addEventListener("pointermove", function (ev) {
+      var r = svg.getBoundingClientRect();
+      var px = ev.clientX - r.left;
+      var frac = Math.min(1, Math.max(0, (px - M.l) / pw));
+      var xv = xLo * Math.pow(xHi / xLo, frac);
+      // nearest sample index (shared x grid)
+      var pts = cfg.series[0].pts, best = 0, bd = Infinity, i;
+      for (i = 0; i < pts.length; i++) {
+        var d = Math.abs(Math.log(pts[i].x) - Math.log(xv));
+        if (d < bd) { bd = d; best = i; }
+      }
+      var sx = X(pts[best].x);
+      vline.setAttribute("x1", sx); vline.setAttribute("x2", sx);
+      vline.style.display = "block";
+      var html = '<div class="t">' + cfg.tipTitle(pts[best].x) + "</div>";
+      cfg.series.forEach(function (s) {
+        html += '<div class="r"><span class="sw" style="background:var(' + s.color + ')"></span>' + s.name + "<b>" + cfg.yFmt(s.pts[best].y, true) + "</b></div>";
+      });
+      tip.innerHTML = html;
+      tip.style.display = "block";
+      var tw = tip.offsetWidth;
+      var left = sx + 14 + tw > W ? sx - tw - 14 : sx + 14;
+      tip.style.left = left + "px";
+      tip.style.top = Math.max(6, ev.clientY - r.top - 30) + "px";
+    });
+    overlay.addEventListener("pointerleave", function () {
+      vline.style.display = "none"; tip.style.display = "none";
+    });
+
+    wrap.querySelectorAll("svg").forEach(function (old) { old.remove(); });
+    wrap.insertBefore(svg, tip);
+  }
+
+  // ---------- chart 1: cost vs N ----------
+  function renderChart1() {
+    var xs = logspace(1e4, 1e7, 49);
+    var s1 = [], s2 = [];
+    xs.forEach(function (n) {
+      var m = calc(n, P.duty, P, true);
+      s1.push({ x: n, y: m.total });
+      s2.push({ x: n, y: m.aoTotal });
+    });
+    renderLogChart("chart1", {
+      xLo: 1e4, xHi: 1e7,
+      xFmt: fmtApps, yFmt: function (v) { return fmtMoney(v); },
+      xLabel: "apps on the platform (log)",
+      aria: "Monthly infrastructure cost versus fleet size, sleeping cloud versus always-resident, log-log",
+      tipTitle: function (x) { return fmtApps(x) + " apps"; },
+      series: [
+        { name: "Always-resident", color: "--series-2", pts: s2, labelDy: -10 },
+        { name: "Sleeping cloud", color: "--series-1", pts: s1, labelDy: -10 }
+      ]
+    });
+    fillTable("table1", ["Apps", "Sleeping cloud $/mo", "Always-resident $/mo"], xs, function (n, i) {
+      return [fmtApps(n), fmtMoney(s1[i].y), fmtMoney(s2[i].y)];
+    });
+  }
+
+  // ---------- chart 2: per-app cost vs duty ----------
+  function renderChart2() {
+    var xs = logspace(0.0005, 0.15, 49);
+    var s1 = [], s2 = [];
+    var aoPer = calc(P.N, P.duty, P, true).aoPerApp;
+    xs.forEach(function (d) {
+      var m = calc(P.N, d, P, true);
+      s1.push({ x: d, y: m.perApp });
+      s2.push({ x: d, y: aoPer });
+    });
+    var mcur = calc(P.N, P.duty, P, true);
+    renderLogChart("chart2", {
+      xLo: 0.0005, xHi: 0.15,
+      xFmt: function (v) { return fmtDuty(v); },
+      yFmt: function (v) { return fmtPerApp(v); },
+      xLabel: "blended duty cycle (log)",
+      aria: "Cost per app per month versus duty cycle, with flat always-resident reference line",
+      tipTitle: function (x) { return "duty " + fmtDuty(x); },
+      marker: { x: P.duty, y: mcur.perApp },
+      series: [
+        { name: "Always-resident", color: "--series-2", pts: s2, dash: true, labelDy: 16 },
+        { name: "Sleeping cloud", color: "--series-1", pts: s1, labelDy: -10 }
+      ]
+    });
+    fillTable("table2", ["Duty cycle", "Sleeping cloud $/app", "Always-resident $/app"], xs, function (d, i) {
+      return [fmtDuty(d), fmtPerApp(s1[i].y), fmtPerApp(s2[i].y)];
+    });
+  }
+
+  function fillTable(id, heads, xs, rowFn) {
+    var host = document.getElementById(id);
+    var html = "<table><thead><tr>";
+    heads.forEach(function (h) { html += "<th>" + h + "</th>"; });
+    html += "</tr></thead><tbody>";
+    for (var i = 0; i < xs.length; i += 6) {
+      html += "<tr>";
+      rowFn(xs[i], i).forEach(function (c) { html += "<td>" + c + "</td>"; });
+      html += "</tr>";
+    }
+    html += "</tbody></table>";
+    host.innerHTML = html;
+  }
+
+  // ---------- resize ----------
+  var rto = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(rto);
+    rto = setTimeout(function () { renderChart1(); renderChart2(); }, 150);
+  });
+
+  recompute();
+})();
+</script>

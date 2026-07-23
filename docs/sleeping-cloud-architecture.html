@@ -1,0 +1,507 @@
+<title>The Sleeping Cloud — Architecture</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f7f8fa; --surface: #fdfdfe;
+    --ink: #171b21; --ink-2: #4e5661; --ink-3: #8a919b;
+    --hairline: #e3e6ea; --baseline: #c6cad1; --code-bg: #eef1f5;
+    --accent: #2a78d6; --accent-ink: #1c5cab;
+    --t-edge: #2a78d6; --t-ctrl: #4a3aa7; --t-data: #1baf7a;
+    --t-guest: #eb6834; --t-store: #8a919b;
+    --tier-1: #104281; --tier-2: #2a78d6; --tier-3: #5598e7; --tier-4: #9ec5f4;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --serif: Charter, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --bg: #0e1116; --surface: #141920;
+      --ink: #eef1f5; --ink-2: #a9b1bc; --ink-3: #79818c;
+      --hairline: #242b34; --baseline: #3a434f; --code-bg: #1d242e;
+      --accent: #3987e5; --accent-ink: #6da7ec;
+      --t-edge: #3987e5; --t-ctrl: #9085e9; --t-data: #199e70;
+      --t-guest: #d95926; --t-store: #79818c;
+      --tier-1: #9ec5f4; --tier-2: #6da7ec; --tier-3: #3987e5; --tier-4: #1c5cab;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1116; --surface: #141920;
+    --ink: #eef1f5; --ink-2: #a9b1bc; --ink-3: #79818c;
+    --hairline: #242b34; --baseline: #3a434f; --code-bg: #1d242e;
+    --accent: #3987e5; --accent-ink: #6da7ec;
+    --t-edge: #3987e5; --t-ctrl: #9085e9; --t-data: #199e70;
+    --t-guest: #d95926; --t-store: #79818c;
+    --tier-1: #9ec5f4; --tier-2: #6da7ec; --tier-3: #3987e5; --tier-4: #1c5cab;
+  }
+
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--serif); font-size: 17px; line-height: 1.65;
+    margin: 0; padding: 0 20px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .col { max-width: 66ch; margin: 0 auto; }
+  .wide { max-width: 1040px; margin: 0 auto; }
+  h1, h2, h3 { font-family: var(--sans); text-wrap: balance; }
+  h1 { font-size: clamp(30px, 5vw, 42px); font-weight: 750; letter-spacing: -0.02em; line-height: 1.08; margin: 10px 0 12px; }
+  h3 { font-size: 19px; font-weight: 680; margin: 0; letter-spacing: -0.01em; }
+  p { margin: 0 0 16px; }
+  code { font-family: var(--mono); font-size: 0.82em; background: var(--code-bg); border-radius: 4px; padding: 1.5px 5.5px; }
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3); margin: 0 0 6px; }
+  .eyebrow b { color: var(--accent-ink); font-weight: 600; }
+  header.masthead { padding: 60px 0 4px; }
+  .subtitle { font-size: 19px; color: var(--ink-2); max-width: 62ch; margin: 0 0 22px; }
+
+  /* legend */
+  .legend {
+    font-family: var(--sans); font-size: 13px; color: var(--ink-2);
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+    padding: 16px 20px; margin: 26px auto 0;
+    display: flex; flex-wrap: wrap; gap: 12px 26px; align-items: center;
+  }
+  .legend .li { display: inline-flex; align-items: center; gap: 8px; }
+  .legend .sw { width: 13px; height: 13px; border-radius: 4px; border: 1.5px solid; flex: none; }
+  .legend .ln { width: 26px; height: 0; border-top: 2px solid var(--ink-3); flex: none; }
+  .legend .ln.dash { border-top-style: dashed; }
+  .legend .pill { font-family: var(--mono); font-size: 9.5px; background: var(--ink); color: var(--bg); border-radius: 8px; padding: 2px 7px; flex: none; }
+  .legend .stepd { width: 19px; height: 19px; border-radius: 50%; background: var(--accent); color: #fff; font-family: var(--sans); font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+
+  /* diagram cards */
+  section.d { margin-top: 64px; }
+  .dcard { background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: 26px 26px 18px; }
+  .dhead { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; }
+  .dnum { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent-ink); }
+  .dlead { font-family: var(--sans); font-size: 15px; color: var(--ink-2); line-height: 1.6; max-width: 78ch; margin: 0 0 18px; }
+  .dscroll { overflow-x: auto; margin: 0 -6px; padding: 0 6px; }
+  .dscroll svg { display: block; width: 100%; height: auto; min-width: 820px; }
+  ul.notes { font-family: var(--sans); font-size: 14px; color: var(--ink-2); line-height: 1.6; margin: 16px 0 4px; padding-left: 20px; border-top: 1px solid var(--hairline); padding-top: 14px; }
+  ul.notes li { margin-bottom: 8px; }
+  ul.notes li::marker { color: var(--accent); }
+  ul.notes b { color: var(--ink); font-weight: 600; }
+
+  footer.end { margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--hairline); font-family: var(--mono); font-size: 12px; color: var(--ink-3); line-height: 1.8; }
+</style>
+
+<header class="masthead">
+  <div class="col">
+    <p class="eyebrow"><b>Engineering design review</b> · Small-software cloud · companion to “Fencing the Sleeping Cloud”</p>
+    <h1>The Sleeping Cloud — Architecture</h1>
+    <p class="subtitle">Six views of the system, one idea per view. Colors mean the same thing in every diagram; the dark pills mark exactly where an epoch check is enforced — rule numbers refer to the protocol document.</p>
+  </div>
+  <div class="wide">
+    <div class="legend" aria-label="Diagram legend">
+      <span class="li"><span class="sw" style="border-color:var(--t-edge); background:color-mix(in srgb, var(--t-edge) 10%, var(--surface))"></span>Edge &amp; routing</span>
+      <span class="li"><span class="sw" style="border-color:var(--t-ctrl); background:color-mix(in srgb, var(--t-ctrl) 10%, var(--surface))"></span>Control plane — leases, epochs</span>
+      <span class="li"><span class="sw" style="border-color:var(--t-data); background:color-mix(in srgb, var(--t-data) 10%, var(--surface))"></span>Durability plane</span>
+      <span class="li"><span class="sw" style="border-color:var(--t-guest); background:color-mix(in srgb, var(--t-guest) 10%, var(--surface))"></span>Untrusted guest code</span>
+      <span class="li"><span class="sw" style="border-color:var(--t-store); background:color-mix(in srgb, var(--t-store) 10%, var(--surface))"></span>Data at rest</span>
+      <span class="li"><span class="ln"></span>synchronous</span>
+      <span class="li"><span class="ln dash"></span>async / control</span>
+      <span class="li"><span class="pill">E3</span>epoch check (protocol rule)</span>
+      <span class="li"><span class="stepd">1</span>sequence step</span>
+    </div>
+  </div>
+</header>
+
+<!-- D1 -->
+<section class="d wide">
+  <div class="dcard">
+    <div class="dhead"><span class="dnum">D1</span><h3>The system at a glance</h3></div>
+    <p class="dlead">Two kinds of client — a teammate using an app, and the coding agent that deploys it — meet the platform at the edge. Everything stateful lives inside <b>cells</b>: self-contained groups of 50–200 hosts with their own control plane, so a bad day stays inside one cell. The global layer is deliberately thin, and object storage — not any server — is the arbiter of record.</p>
+    <div class="dscroll"><svg id="d1" viewBox="0 0 960 566" role="img" aria-label="System overview: clients, edge, global layer, cells, object storage"></svg></div>
+    <ul class="notes">
+      <li><b>The global layer holds no app data.</b> It maps app → cell and users → orgs. If it degrades, running apps keep serving; only new lookups slow down.</li>
+      <li><b>Cells are the blast radius.</b> Each has its own lease table and gateway. A control-plane bug takes down wakes in one cell, not the platform.</li>
+      <li><b>The gateway is a cache of the truth,</b> not the truth. Every manifest mutation is a conditional write to object storage (rule E4) — which is why gateway split-brain is survivable (pressure test PT-4).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- D2 -->
+<section class="d wide">
+  <div class="dcard">
+    <div class="dhead"><span class="dnum">D2</span><h3>Life of a request — waking a frozen app</h3></div>
+    <p class="dlead">The defining flow of the platform. A request arrives for an app that doesn't exist in RAM anywhere. The router parks the request, orchestrates a wake, and replays it — the user experiences one slow request, never an error. The time ruler shows where the 300&nbsp;ms budget (gate G1) actually goes: nearly all of it is the snapshot restore.</p>
+    <div class="dscroll"><svg id="d2" viewBox="0 0 960 470" role="img" aria-label="Wake-on-request sequence with time budget ruler"></svg></div>
+    <ul class="notes">
+      <li><b>Steps 4 and 5 overlap.</b> The snapshot prefetch can begin optimistically before the lease CAS lands — but no externally visible effect happens until the new epoch is held (rule E6).</li>
+      <li><b>The lease CAS is the only global coordination point,</b> one conditional write in the cell's store. Everything else on the critical path is host-local I/O.</li>
+      <li><b>Warm apps skip almost all of this:</b> if the app is already resident, the router forwards directly and the whole left half of the ruler collapses to ~2 ms.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- D3 -->
+<section class="d wide">
+  <div class="dcard">
+    <div class="dhead"><span class="dnum">D3</span><h3>Inside one host — the trust boundary</h3></div>
+    <p class="dlead">One bare-metal machine runs one trusted <b>host agent</b> and many Firecracker microVMs full of code nobody reviewed — agents wrote it. The dashed line is the design's most important commitment: everything that matters for correctness (leases, epoch stamps, WAL shipping) happens on the host-agent side. The guest is never asked to cooperate with its own containment.</p>
+    <div class="dscroll"><svg id="d3" viewBox="0 0 960 540" role="img" aria-label="Host internals: trusted host agent, untrusted microVMs, NVMe cache, trust boundary"></svg></div>
+    <ul class="notes">
+      <li><b>The guest sees an ordinary Linux disk.</b> Its SQLite writes land on a virtio block device served by the host, and the host agent tails the WAL from outside the VM — that's how epoch stamping (rule E2) stays in trusted hands.</li>
+      <li><b>The guest has no network path to the gateway or control plane.</b> Its egress goes through a policied proxy; its durability goes through the host agent. A prompt-injected app can misbehave, but it cannot forge an epoch.</li>
+      <li><b>Density comes from the frozen majority:</b> the ghost box is the point — hundreds of thousands of apps are resident on this host as NVMe snapshots costing zero RAM.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- D4 -->
+<section class="d wide">
+  <div class="dcard">
+    <div class="dhead"><span class="dnum">D4</span><h3>The write path — every effect fenced</h3></div>
+    <p class="dlead">Follow one <code>INSERT</code> from untrusted code to durable, fenced storage. The two dark pills are where a stale writer dies: the gateway refuses WAL segments from a superseded epoch (E3), and the object-store manifest only mutates via compare-and-swap (E4). The ack flows back only after the gateway accepts — that ordering is the durability contract D1, and it's why a partition zombie can never lose an acknowledged write.</p>
+    <div class="dscroll"><svg id="d4" viewBox="0 0 960 400" role="img" aria-label="Write path from guest through host agent and gateway to object storage, with ack path and fences"></svg></div>
+    <ul class="notes">
+      <li><b>Group commit hides the sync cost:</b> WAL frames batch into ~1 MB or 1-second segments, so the +1–5 ms in-region round trip is paid per batch, not per statement.</li>
+      <li><b>A rejected segment is a death sentence, by design.</b> The gateway's refusal tells the host agent its instance is a zombie; it kills the VM and discards local state (pressure test PT-1).</li>
+      <li><b>Cross-region replication is async</b> — region loss costs seconds of writes (documented RPO, contract D3); any single host or gateway loss costs zero.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- D5 -->
+<section class="d wide">
+  <div class="dcard">
+    <div class="dhead"><span class="dnum">D5</span><h3>Snapshot heat tiers — where apps live and what they cost</h3></div>
+    <p class="dlead">The economics of the whole company in one picture. An app moves right as it cools — each demotion is a policy decision made by the platform — and moves left instantly on demand. At any moment ~95% of all apps sit in the rightmost tier costing about a third of a cent a month, which is what makes “as free as a Google Doc” a real price.</p>
+    <div class="dscroll"><svg id="d5" viewBox="0 0 960 356" role="img" aria-label="Four heat tiers from hot RAM to frozen archive with resume latency and cost per app"></svg></div>
+    <ul class="notes">
+      <li><b>Demotion is policy, promotion is demand.</b> The platform chooses when to snapshot and evict (idle timers, LRU, calendar-aware prediction); users choose when to wake, and the router absorbs the latency by holding the request.</li>
+      <li><b>Every tier transition is fenced:</b> snapshotting registers a manifest (E5 — checked), waking acquires a fresh epoch (E6 — enforced). The tier diagram and the state machine in the protocol doc are the same object at two zoom levels.</li>
+      <li><b>Snapshot bytes are content-addressed and deduplicated</b> across apps sharing base images — the ~4× dedupe assumption is what the Phase-4 benchmark exists to verify.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- D6 -->
+<section class="d wide">
+  <div class="dcard">
+    <div class="dhead"><span class="dnum">D6</span><h3>Sharing &amp; identity — auth is the platform's job, never the app's</h3></div>
+    <p class="dlead">Why sharing agent-built software can be as safe as sharing a document: the app contains zero authentication code. TLS terminates at the edge proxy, which authenticates the person, checks the app's ACL, and forwards the request with a signed identity assertion scoped to that one app. The app reads a header it can cryptographically trust — and credentials never reach untrusted code.</p>
+    <div class="dscroll"><svg id="d6" viewBox="0 0 960 440" role="img" aria-label="Sharing model: three ways in, edge auth proxy, signed identity into the app, ACL with three permission planes"></svg></div>
+    <ul class="notes">
+      <li><b>Three permission planes, deliberately separate:</b> who can <b>use</b> the app, who can <b>edit</b> it (which increasingly means “point their agent at it”), and who can read its <b>data</b> — the plane people forget until an app's SQLite holds other people's submissions.</li>
+      <li><b>✕ There is no direct network path from user to app.</b> Every request crosses the proxy, so revoking a share takes effect on the next request — no app redeploy, no key rotation.</li>
+      <li><b>The assertion is scoped to one app.</b> A malicious or prompt-injected app can see who's using <em>it</em>; it cannot replay that identity against any other app or service.</li>
+    </ul>
+  </div>
+</section>
+
+<footer class="end">
+  <div class="col">
+    sleeping-cloud-architecture · six views · 2026-07-22<br>
+    siblings: “Fencing the Sleeping Cloud” (protocol pressure test + unit economics) · wake-path-benchmark.md · FencingProtocol.tla
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+
+  function el(parent, tag, attrs, styles) {
+    var e = document.createElementNS(NS, tag), k;
+    for (k in attrs) e.setAttribute(k, attrs[k]);
+    if (styles) for (k in styles) e.style[k] = styles[k];
+    parent.appendChild(e);
+    return e;
+  }
+  function text(svg, x, y, str, o) {
+    o = o || {};
+    var t = el(svg, "text", { x: x, y: y, "text-anchor": o.anchor || "start", "font-size": o.size || 11 });
+    t.style.fill = o.fill || "var(--ink-2)";
+    t.style.fontFamily = o.mono ? "ui-monospace, Menlo, monospace" : "system-ui, -apple-system, sans-serif";
+    if (o.weight) t.style.fontWeight = o.weight;
+    if (o.ls) t.style.letterSpacing = o.ls;
+    if (o.halo) { t.style.stroke = "var(--surface)"; t.style.strokeWidth = 3.5; t.style.paintOrder = "stroke"; }
+    t.textContent = str;
+    return t;
+  }
+  function tone2col(tone) { return "var(--t-" + tone + ")"; }
+  function box(svg, o) {
+    var stroke = o.tone ? tone2col(o.tone) : "var(--baseline)";
+    var fill = o.tone ? "color-mix(in srgb, " + tone2col(o.tone) + " 9%, var(--surface))" : "var(--surface)";
+    el(svg, "rect", { x: o.x, y: o.y, width: o.w, height: o.h, rx: o.r || 10 },
+      { fill: fill, stroke: stroke, strokeWidth: 1.5, strokeDasharray: o.dashed ? "5 4" : "none" });
+    if (o.title) text(svg, o.x + 13, o.y + 22, o.title, { size: 13, weight: 620, fill: "var(--ink)" });
+    (o.sub || []).forEach(function (line, i) {
+      text(svg, o.x + 13, o.y + 41 + i * 15, line, { size: 11 });
+    });
+    if (o.chip) {
+      var cw = o.chip.length * 6.4 + 12;
+      el(svg, "rect", { x: o.x + o.w - cw - 9, y: o.y + 9, width: cw, height: 15, rx: 7.5 },
+        { fill: "none", stroke: tone2col(o.tone || "store"), strokeWidth: 1 });
+      text(svg, o.x + o.w - cw / 2 - 9, o.y + 20, o.chip, { size: 8.5, anchor: "middle", fill: tone2col(o.tone || "store"), weight: 600, ls: "0.08em" });
+    }
+  }
+  function lane(svg, o) {
+    el(svg, "rect", { x: o.x, y: o.y, width: o.w, height: o.h, rx: 12 },
+      { fill: "color-mix(in srgb, " + tone2col(o.tone) + " 4.5%, var(--bg))",
+        stroke: "color-mix(in srgb, " + tone2col(o.tone) + " 45%, var(--hairline))", strokeWidth: 1 });
+    el(svg, "rect", { x: o.x + 13, y: o.y + 12, width: 9, height: 9, rx: 2.5 }, { fill: tone2col(o.tone) });
+    text(svg, o.x + 29, o.y + 20, o.label, { size: 10, mono: true, weight: 600, ls: "0.1em", fill: "var(--ink-2)" });
+  }
+  function arrowhead(svg, x1, y1, x2, y2, color) {
+    var dx = x2 - x1, dy = y2 - y1, L = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ux = dx / L, uy = dy / L, px = -uy, py = ux, s = 7;
+    el(svg, "polygon", { points: x2 + "," + y2 + " " + (x2 - s * ux + 3.4 * px) + "," + (y2 - s * uy + 3.4 * py) + " " + (x2 - s * ux - 3.4 * px) + "," + (y2 - s * uy - 3.4 * py) }, { fill: color });
+  }
+  function arrow(svg, pts, o) {
+    o = o || {};
+    var color = o.tone ? tone2col(o.tone) : "var(--ink-3)";
+    var d = pts.map(function (p, i) { return (i ? "L" : "M") + p[0] + " " + p[1]; }).join("");
+    el(svg, "path", { d: d, fill: "none" },
+      { stroke: color, strokeWidth: 1.8, strokeDasharray: o.dashed ? "5 4" : "none" });
+    var a = pts[pts.length - 2], b = pts[pts.length - 1];
+    arrowhead(svg, a[0], a[1], b[0], b[1], color);
+    if (o.both) { var c = pts[1], s = pts[0]; arrowhead(svg, c[0], c[1], s[0], s[1], color); }
+    if (o.label) text(svg, o.lx, o.ly, o.label, { size: 11, anchor: o.lanchor || "middle", halo: true, weight: 500 });
+  }
+  function fence(svg, cx, cy, label) {
+    var w = label.length * 6.6 + 14;
+    el(svg, "rect", { x: cx - w / 2, y: cy - 9, width: w, height: 18, rx: 9 }, { fill: "var(--ink)" });
+    text(svg, cx, cy + 3.5, label, { size: 9.5, mono: true, anchor: "middle", fill: "var(--bg)", weight: 600 });
+  }
+  function step(svg, cx, cy, n) {
+    el(svg, "circle", { cx: cx, cy: cy, r: 9.5 }, { fill: "var(--accent)" });
+    text(svg, cx, cy + 3.8, String(n), { size: 11, anchor: "middle", fill: "#fff", weight: 650 });
+  }
+
+  /* ---------------- D1: system at a glance ---------------- */
+  (function () {
+    var s = document.getElementById("d1");
+    lane(s, { x: 250, y: 18, w: 690, h: 56, tone: "ctrl", label: "GLOBAL LAYER — DELIBERATELY THIN" });
+    text(s, 279, 58, "directory: app → cell · identity & orgs · billing. No app data, no data-plane traffic.", { size: 11.5 });
+
+    box(s, { x: 20, y: 130, w: 172, h: 74, title: "Teammate", sub: ["browser · uses shared apps", "5-user scale"] });
+    box(s, { x: 20, y: 244, w: 172, h: 74, title: "Coding agent", sub: ["Claude Code · MCP tools", "deploys, iterates, self-heals"] });
+
+    lane(s, { x: 250, y: 108, w: 200, h: 246, tone: "edge", label: "EDGE — EVERY REGION" });
+    box(s, { x: 268, y: 146, w: 164, h: 88, tone: "edge", title: "Auth proxy", sub: ["TLS terminates here", "SSO + ACL check", "injects signed identity"] });
+    box(s, { x: 268, y: 252, w: 164, h: 88, tone: "edge", title: "Router", sub: ["app → lease holder", "wake-on-request:", "hold, wake, replay"] });
+
+    lane(s, { x: 508, y: 108, w: 432, h: 254, tone: "store", label: "CELL A — 50–200 HOSTS · OWN BLAST RADIUS" });
+    box(s, { x: 528, y: 146, w: 182, h: 92, tone: "ctrl", title: "Control plane", sub: ["lease table (linearizable)", "epochs = fencing tokens", "placement · wake orders"] });
+    box(s, { x: 736, y: 146, w: 182, h: 42, title: "Host — agent + microVMs" });
+    box(s, { x: 736, y: 196, w: 182, h: 42, title: "Host — agent + microVMs" });
+    box(s, { x: 736, y: 246, w: 182, h: 42, title: "Host — agent + microVMs" });
+    text(s, 827, 306, "· · ·", { size: 14, anchor: "middle", fill: "var(--ink-3)" });
+    box(s, { x: 528, y: 258, w: 182, h: 86, tone: "data", title: "Storage gateway", sub: ["WAL sink — a cache", "of the manifest truth"] });
+    fence(s, 692, 258, "E3");
+
+    box(s, { x: 508, y: 380, w: 205, h: 40, title: "Cell B", dashed: true });
+    box(s, { x: 735, y: 380, w: 205, h: 40, title: "Cell C", dashed: true });
+
+    lane(s, { x: 250, y: 448, w: 690, h: 96, tone: "store", label: "OBJECT STORAGE — THE ARBITER OF RECORD" });
+    text(s, 279, 490, "WAL streams + sealed manifests (every mutation is a conditional PUT)", { size: 11.5 });
+    text(s, 279, 508, "snapshot chunks, content-addressed · PITR branches, never rewrites", { size: 11.5 });
+    fence(s, 900, 448, "E4");
+
+    arrow(s, [[192, 167], [268, 176]], { tone: "edge", label: "HTTPS", lx: 228, ly: 160 });
+    arrow(s, [[192, 281], [268, 290]], { tone: "edge", label: "deploy (MCP)", lx: 230, ly: 316 });
+    arrow(s, [[350, 234], [350, 252]], { tone: "edge" });
+    arrow(s, [[432, 278], [496, 278], [496, 248], [736, 248]], { tone: "edge", label: "route / wake", lx: 464, ly: 270 });
+    arrow(s, [[350, 108], [350, 74]], { tone: "ctrl", dashed: true, label: "app → cell", lx: 358, ly: 94, lanchor: "start" });
+    arrow(s, [[710, 192], [736, 208]], { tone: "ctrl", dashed: true });
+    arrow(s, [[736, 275], [710, 290]], { tone: "data", label: "WAL @ epoch", lx: 760, ly: 320, lanchor: "middle" });
+    arrow(s, [[619, 344], [619, 370], [484, 370], [484, 448]], { tone: "data", label: "conditional PUT", lx: 474, ly: 414, lanchor: "end" });
+  })();
+
+  /* ---------------- D2: life of a request ---------------- */
+  (function () {
+    var s = document.getElementById("d2");
+    var Y = 60, H = 72;
+    box(s, { x: 30, y: Y, w: 150, h: H, title: "Teammate", sub: ["GET /roster"] });
+    box(s, { x: 230, y: Y, w: 150, h: H, tone: "edge", title: "Auth proxy", sub: ["ACL ok → identity", "header attached"] });
+    box(s, { x: 430, y: Y, w: 150, h: H, tone: "edge", title: "Router", sub: ["app is FROZEN →", "park request here"] });
+    box(s, { x: 630, y: Y, w: 150, h: H, tone: "edge", title: "Host agent", sub: ["orchestrates the", "wake, holds epoch"] });
+    box(s, { x: 810, y: Y, w: 120, h: H, tone: "guest", title: "microVM", sub: ["gate opens"] });
+
+    arrow(s, [[180, 96], [230, 96]], { tone: "edge" }); step(s, 205, 78, 1);
+    arrow(s, [[380, 96], [430, 96]], { tone: "edge" }); step(s, 405, 78, 2);
+    arrow(s, [[580, 96], [630, 96]], { tone: "edge" }); step(s, 605, 78, 3);
+    text(s, 605, 152, "wake order", { size: 10.5, anchor: "middle", halo: true });
+    arrow(s, [[780, 96], [810, 96]], { tone: "edge" }); step(s, 795, 78, 6);
+    text(s, 795, 152, "request replayed", { size: 10.5, anchor: "middle", halo: true });
+
+    box(s, { x: 430, y: 212, w: 160, h: 62, tone: "ctrl", title: "Cell control plane", sub: ["lease CAS → epoch e+1"] });
+    box(s, { x: 630, y: 212, w: 150, h: 62, tone: "store", title: "NVMe cache", sub: ["mmap snapshot,", "lazy page-in"] });
+    box(s, { x: 810, y: 212, w: 120, h: 62, tone: "data", title: "Gateway", sub: ["replay WAL", "delta → head"] });
+    fence(s, 660, 212, "E6");
+
+    arrow(s, [[655, 132], [655, 172], [512, 172], [512, 212]], { tone: "ctrl", label: "acquire before any effect", lx: 522, ly: 190, lanchor: "start" });
+    step(s, 655, 152, 4);
+    arrow(s, [[705, 132], [705, 212]], { tone: "store" }); step(s, 722, 168, 5);
+    arrow(s, [[762, 132], [762, 190], [868, 190], [868, 212]], { tone: "data" });
+
+    arrow(s, [[870, 60], [870, 28], [105, 28], [105, 60]], { tone: "edge", label: "response — the user saw one slow request, zero errors", lx: 487, ly: 20 });
+    step(s, 105, 44, 7);
+
+    /* time ruler */
+    var segs = [
+      { w: 60, label: "edge + ACL", ms: "~1 ms", tone: "edge" },
+      { w: 90, label: "route + lease CAS", ms: "~5 ms", tone: "ctrl" },
+      { w: 450, label: "snapshot restore (warm NVMe)", ms: "50–200 ms", tone: "store" },
+      { w: 180, label: "WAL delta replay", ms: "5–50 ms", tone: "data" },
+      { w: 100, label: "app handles", ms: "~5 ms", tone: "guest" }
+    ];
+    var x = 40, y = 356;
+    text(s, 40, 340, "WHERE THE FIRST-REQUEST BUDGET GOES", { size: 10, mono: true, ls: "0.1em", fill: "var(--ink-3)" });
+    segs.forEach(function (g) {
+      el(s, "rect", { x: x, y: y, width: g.w - 4, height: 16, rx: 4 },
+        { fill: "color-mix(in srgb, " + tone2col(g.tone) + " 26%, var(--surface))", stroke: tone2col(g.tone), strokeWidth: 1 });
+      text(s, x + 2, y + 34, g.label, { size: 10 });
+      text(s, x + 2, y + 48, g.ms, { size: 10, mono: true, fill: "var(--ink)" });
+      x += g.w;
+    });
+    text(s, 920, 340, "p99 target ≤ 300 ms (gate G1)", { size: 11, anchor: "end", weight: 600, fill: "var(--ink)" });
+  })();
+
+  /* ---------------- D3: inside a host ---------------- */
+  (function () {
+    var s = document.getElementById("d3");
+    lane(s, { x: 20, y: 20, w: 920, h: 424, tone: "store", label: "ONE BARE-METAL HOST — 512 GB · 48 CORES · 7.7 TB NVME" });
+
+    box(s, { x: 50, y: 78, w: 260, h: 160, tone: "edge", title: "Host agent (trusted)", sub: [
+      "acquires & renews leases",
+      "stamps every effect with epoch",
+      "tails SQLite WAL from outside",
+      "snapshot / restore orchestration",
+      "kills instances the gateway fences"
+    ] });
+    fence(s, 290, 78, "E2");
+
+    /* trust boundary */
+    el(s, "line", { x1: 366, y1: 54, x2: 366, y2: 420 }, { stroke: "var(--t-guest)", strokeWidth: 1.5, strokeDasharray: "7 5" });
+    text(s, 378, 66, "TRUST BOUNDARY", { size: 10, mono: true, ls: "0.1em", fill: "var(--t-guest)", weight: 600 });
+    text(s, 378, 82, "guest cooperation is never a safety mechanism", { size: 10.5, fill: "var(--ink-3)" });
+
+    function vm(y, name) {
+      box(s, { x: 420, y: y, w: 494, h: 84, title: "Firecracker microVM — " + name, chip: "UNTRUSTED", tone: "guest",
+        sub: ["agent-written app · SQLite on a virtio disk the host serves", "1 app = 1 VM = 1 writer"] });
+    }
+    vm(100, "app-7f3");
+    vm(198, "app-a12");
+    box(s, { x: 420, y: 296, w: 494, h: 52, dashed: true, title: "…hundreds of thousands more apps — frozen, zero RAM" });
+
+    arrow(s, [[310, 142], [420, 142]], { tone: "edge", both: true, label: "virtio disk & net", lx: 365, ly: 132 });
+    arrow(s, [[310, 228], [420, 228]], { tone: "edge", both: true });
+
+    box(s, { x: 50, y: 296, w: 260, h: 108, tone: "store", title: "Local NVMe", sub: ["snapshot cache — the warm tier", "golden rootfs + CoW clones", "mmap source for restores"] });
+    arrow(s, [[180, 238], [180, 296]], { tone: "store", both: true });
+
+    /* exit to gateway */
+    arrow(s, [[50, 180], [34, 180], [34, 470], [140, 470]], { tone: "data" });
+    box(s, { x: 140, y: 448, w: 330, h: 44, tone: "data", title: "→ storage gateway: WAL segments @ epoch" });
+    text(s, 490, 476, "the guest never talks to the gateway — only this arrow does", { size: 11, fill: "var(--ink-3)" });
+  })();
+
+  /* ---------------- D4: write path ---------------- */
+  (function () {
+    var s = document.getElementById("d4");
+    box(s, { x: 290, y: 18, w: 190, h: 44, tone: "ctrl", title: "lease @ epoch e", dashed: true });
+    arrow(s, [[385, 62], [385, 90]], { tone: "ctrl", dashed: true });
+
+    var Y = 90, H = 112;
+    box(s, { x: 30, y: Y, w: 200, h: H, tone: "guest", chip: "UNTRUSTED", title: "Guest app", sub: ["INSERT → SQLite WAL", "frames land on the", "virtio disk"] });
+    box(s, { x: 290, y: Y, w: 190, h: H, tone: "edge", title: "Host agent", sub: ["tails WAL frames,", "stamps epoch e,", "batches into segments"] });
+    box(s, { x: 540, y: Y, w: 190, h: H, tone: "data", title: "Storage gateway", sub: ["accept iff e ≥ current;", "seal old epoch on", "takeover; else reject"] });
+    box(s, { x: 790, y: Y, w: 140, h: H, tone: "store", title: "Object storage", sub: ["segment append +", "manifest CAS"] });
+    fence(s, 635, Y, "E3");
+    fence(s, 860, Y, "E4");
+
+    arrow(s, [[230, 128], [290, 128]], { tone: "guest", label: "write", lx: 260, ly: 118 });
+    arrow(s, [[480, 128], [540, 128]], { tone: "data", label: "segment @ e", lx: 510, ly: 118 });
+    arrow(s, [[730, 128], [790, 128]], { tone: "data", label: "cond. PUT", lx: 760, ly: 118 });
+
+    arrow(s, [[860, 202], [860, 244], [130, 244], [130, 202]], { tone: "data",
+      label: "group-commit ack — now, and only now, is the write durable (D1) · +1–5 ms in-region", lx: 495, ly: 264 });
+
+    arrow(s, [[900, 202], [900, 300], [820, 300]], { tone: "store", dashed: true });
+    box(s, { x: 580, y: 276, w: 240, h: 52, tone: "store", dashed: true, title: "Other-region replica", sub: ["async · RPO seconds (D3)"] });
+
+    text(s, 30, 352, "A rejected segment ⇒ the pushing instance is a zombie ⇒ the host agent kills it and discards local state (PT-1).", { size: 12, fill: "var(--ink-2)" });
+    text(s, 30, 372, "The guest cannot skip the fences: it has no network path to the gateway at all — see D3.", { size: 12, fill: "var(--ink-2)" });
+  })();
+
+  /* ---------------- D5: heat tiers ---------------- */
+  (function () {
+    var s = document.getElementById("d5");
+    var tiers = [
+      { name: "HOT", med: "guest RAM — serving", lat: "serving now", cost: "RAM-hours — the only", cost2: "expensive state", share: "~0.4% of apps", col: "--tier-1" },
+      { name: "WARM", med: "local NVMe snapshot", lat: "50–200 ms resume", cost: "NVMe pennies", cost2: "", share: "recently active", col: "--tier-2" },
+      { name: "COLD", med: "regional object storage", lat: "~1–3 s resume", cost: "< 1¢ / app / mo", cost2: "", share: "tail of active", col: "--tier-3" },
+      { name: "FROZEN", med: "archive-class storage", lat: "3–10 s (rare)", cost: "~⅓¢ / app / mo", cost2: "", share: "~95% of all apps", col: "--tier-4" }
+    ];
+    tiers.forEach(function (t, i) {
+      var x = 30 + i * 230;
+      el(s, "rect", { x: x, y: 80, width: 210, height: 168, rx: 12 },
+        { fill: "color-mix(in srgb, var(" + t.col + ") 7%, var(--surface))", stroke: "var(" + t.col + ")", strokeWidth: 2 });
+      text(s, x + 16, 110, t.name, { size: 17, weight: 750, fill: "var(--ink)", ls: "0.02em" });
+      text(s, x + 16, 133, t.med, { size: 11.5 });
+      text(s, x + 16, 156, t.lat, { size: 12, mono: true, fill: "var(--ink)", weight: 600 });
+      text(s, x + 16, 181, t.cost, { size: 11.5 });
+      if (t.cost2) text(s, x + 16, 196, t.cost2, { size: 11.5 });
+      text(s, x + 16, 226, t.share, { size: 11, mono: true, fill: "var(--ink-3)" });
+    });
+    var demote = [["idle timeout", 250], ["LRU eviction", 480], ["age", 710]];
+    demote.forEach(function (d) {
+      arrow(s, [[d[1] - 10, 54], [d[1] + 30, 54]], { tone: "store", label: d[0], lx: d[1] + 10, ly: 42 });
+    });
+    text(s, 30, 46, "cooling →", { size: 10.5, mono: true, fill: "var(--ink-3)" });
+    arrow(s, [[850, 248], [850, 292], [135, 292], [135, 250]], { tone: "edge",
+      label: "request or cron → wake · the router holds the request while the app climbs back", lx: 492, ly: 312 });
+    text(s, 492, 336, "demotion is a policy decision; promotion is always demand", { size: 11.5, anchor: "middle", fill: "var(--ink-3)" });
+  })();
+
+  /* ---------------- D6: sharing & identity ---------------- */
+  (function () {
+    var s = document.getElementById("d6");
+    box(s, { x: 30, y: 58, w: 190, h: 54, title: "Invited teammate", sub: ["kim@acme.com"] });
+    box(s, { x: 30, y: 136, w: 190, h: 54, title: "Domain share", sub: ["anyone@acme.com"] });
+    box(s, { x: 30, y: 214, w: 190, h: 54, title: "Link holder", sub: ["capability URL"] });
+
+    box(s, { x: 306, y: 58, w: 280, h: 230, tone: "edge", title: "Edge auth proxy", sub: [] });
+    var lines = [
+      "authenticate — SSO or magic link",
+      "check this app's ACL — role?",
+      "mint identity assertion — a JWT",
+      "scoped to app-7f3 only",
+      "forward request + trusted header"
+    ];
+    var ly = 100; var stepn = 1;
+    [0, 1, 2, 4].forEach(function (idx, i) {
+      step(s, 330, ly + i * 42 - 4, stepn++);
+      text(s, 348, ly + i * 42, lines[idx], { size: 11.5 });
+      if (idx === 2) text(s, 348, ly + i * 42 + 16, lines[3], { size: 11.5 });
+    });
+
+    box(s, { x: 660, y: 96, w: 270, h: 130, tone: "guest", chip: "UNTRUSTED", title: "App microVM", sub: [
+      "reads  X-App-User: kim@acme.com",
+      "signature checks out → trusted",
+      "zero auth code in the app itself"
+    ] });
+
+    arrow(s, [[220, 85], [306, 100]], { tone: "edge" });
+    arrow(s, [[220, 163], [306, 163]], { tone: "edge" });
+    arrow(s, [[220, 241], [306, 226]], { tone: "edge" });
+    arrow(s, [[586, 161], [660, 161]], { tone: "edge", label: "signed identity", lx: 623, ly: 151 });
+
+    box(s, { x: 306, y: 322, w: 280, h: 92, tone: "store", title: "ACL — app-7f3", sub: [
+      "use:   anyone@acme.com",
+      "edit:  sam@acme.com (+ their agent)",
+      "data:  owners only"
+    ] });
+    arrow(s, [[446, 322], [446, 288]], { tone: "store", dashed: true });
+
+    text(s, 660, 268, "✕  no direct path — TLS ends at the proxy,", { size: 12, fill: "var(--ink)", weight: 600 });
+    text(s, 676, 286, "so revoking a share bites on the next request", { size: 11.5, fill: "var(--ink-2)" });
+    text(s, 660, 330, "three permission planes:", { size: 11.5, fill: "var(--ink-2)" });
+    text(s, 660, 348, "use  ·  edit  ·  data", { size: 12, mono: true, fill: "var(--ink)", weight: 600 });
+    text(s, 660, 368, "“edit” increasingly means: may point", { size: 11.5, fill: "var(--ink-2)" });
+    text(s, 660, 384, "their agent at this app", { size: 11.5, fill: "var(--ink-2)" });
+  })();
+})();
+</script>
