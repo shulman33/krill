@@ -7,10 +7,11 @@ tla2tools.jar
 states/
 *.st
 
-# Go build output
+# Go build output (never a bare "krilld" pattern — it swallows cmd/krilld/)
 /bin/
 /dist/
-krilld
+/krilld
+m1-gates/krilld
 *.test
 
 # Big binary artifacts that never belong in git
