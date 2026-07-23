@@ -1,0 +1,1 @@
+cache=cold elapsed_s=22 budget_s=240 url=http://guestbook.krill.local:8080/

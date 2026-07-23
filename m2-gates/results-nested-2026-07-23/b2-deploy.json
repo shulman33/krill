@@ -1,0 +1,21 @@
+{
+  "app": {
+    "name": "guestbook",
+    "state": "ACTIVE",
+    "snapshot_valid": false,
+    "subnet_idx": 0,
+    "guest_addr": "172.16.0.2:8000",
+    "guest_port": 8000,
+    "vcpus": 1,
+    "mem_mib": 512,
+    "inflight": 0,
+    "last_used": "2026-07-23T20:37:00.85295668Z",
+    "last_wake_ms": 1877
+  },
+  "url": "http://guestbook.krill.local:8080/",
+  "created": false,
+  "ready": true,
+  "size_mb": 1024,
+  "build_secs": 4.1,
+  "curl_hint": "curl -H 'Host: guestbook.krill.local' http://\u003crouter-host\u003e:8080/"
+}

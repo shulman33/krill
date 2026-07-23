@@ -1,0 +1,4 @@
+Deployed gbmcp (created; image 1024 MB; build 2.5s)
+URL: http://gbmcp.krill.local:8080/
+(no DNS for http://gbmcp.krill.local:8080/? curl -H 'Host: gbmcp.krill.local' http://<router-host>:8080/)
+Ready: yes — first wake 1893 ms, state ACTIVE.

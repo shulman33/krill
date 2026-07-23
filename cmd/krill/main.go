@@ -74,6 +74,23 @@ func (c *client) flags(name string) *flag.FlagSet {
 	return fs
 }
 
+// parseFlexible parses flags while collecting positional arguments wherever
+// they appear. Go's flag package stops at the first positional, which turns
+// "krill deploy dir --json" into silently ignored flags — exactly the kind
+// of footgun an agent trips on.
+func parseFlexible(fs *flag.FlagSet, args []string) []string {
+	var pos []string
+	for {
+		fs.Parse(args)
+		rem := fs.Args()
+		if len(rem) == 0 {
+			return pos
+		}
+		pos = append(pos, rem[0])
+		args = rem[1:]
+	}
+}
+
 // deployResp mirrors the admin API's deploy payload (the fields we render).
 type deployResp struct {
 	App struct {
@@ -105,11 +122,11 @@ func (c *client) deploy(args []string) error {
 	sizeMB := fs.Int("size-mb", 0, "rootfs size in MB (default: auto)")
 	noVerify := fs.Bool("no-verify", false, "skip the post-deploy verification wake")
 	asJSON := fs.Bool("json", false, "print the raw API response")
-	fs.Parse(args)
+	pos := parseFlexible(fs, args)
 
 	dir := "."
-	if fs.NArg() > 0 {
-		dir = fs.Arg(0)
+	if len(pos) > 0 {
+		dir = pos[0]
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -247,11 +264,11 @@ func (c *client) logs(args []string) error {
 	fs := c.flags("logs")
 	tail := fs.Int("tail", 100, "lines of serial log")
 	asJSON := fs.Bool("json", false, "raw JSON")
-	fs.Parse(args)
-	if fs.NArg() != 1 {
+	pos := parseFlexible(fs, args)
+	if len(pos) != 1 {
 		return fmt.Errorf("usage: krill logs <app>")
 	}
-	raw, err := c.get(fmt.Sprintf("/v1/apps/%s/logs?tail=%d", fs.Arg(0), *tail))
+	raw, err := c.get(fmt.Sprintf("/v1/apps/%s/logs?tail=%d", pos[0], *tail))
 	if err != nil {
 		return err
 	}
@@ -278,11 +295,11 @@ func (c *client) logs(args []string) error {
 
 func (c *client) appJSON(args []string, cmd, suffix string) error {
 	fs := c.flags(cmd)
-	fs.Parse(args)
-	if fs.NArg() != 1 {
+	pos := parseFlexible(fs, args)
+	if len(pos) != 1 {
 		return fmt.Errorf("usage: krill %s <app>", cmd)
 	}
-	raw, err := c.get("/v1/apps/" + fs.Arg(0) + suffix)
+	raw, err := c.get("/v1/apps/" + pos[0] + suffix)
 	if err != nil {
 		return err
 	}
@@ -292,12 +309,12 @@ func (c *client) appJSON(args []string, cmd, suffix string) error {
 
 func (c *client) appPost(args []string, action string) error {
 	fs := c.flags(action)
-	fs.Parse(args)
-	if fs.NArg() != 1 {
+	pos := parseFlexible(fs, args)
+	if len(pos) != 1 {
 		return fmt.Errorf("usage: krill %s <app>", action)
 	}
 	c.http.Timeout = 3 * time.Minute
-	resp, err := c.http.Post(c.admin+"/v1/apps/"+fs.Arg(0)+"/"+action, "application/json", nil)
+	resp, err := c.http.Post(c.admin+"/v1/apps/"+pos[0]+"/"+action, "application/json", nil)
 	if err != nil {
 		return err
 	}
@@ -312,11 +329,11 @@ func (c *client) appPost(args []string, action string) error {
 
 func (c *client) delete(args []string) error {
 	fs := c.flags("delete")
-	fs.Parse(args)
-	if fs.NArg() != 1 {
+	pos := parseFlexible(fs, args)
+	if len(pos) != 1 {
 		return fmt.Errorf("usage: krill delete <app>")
 	}
-	req, _ := http.NewRequest(http.MethodDelete, c.admin+"/v1/apps/"+fs.Arg(0), nil)
+	req, _ := http.NewRequest(http.MethodDelete, c.admin+"/v1/apps/"+pos[0], nil)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
