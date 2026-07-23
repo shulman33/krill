@@ -317,7 +317,9 @@ func (s *Supervisor) Freeze(name string) error {
 		return ErrNotActive
 	}
 	if a.inflight > 0 {
+		n := a.inflight
 		a.mu.Unlock()
+		s.log.Info("freeze rejected: requests in flight", "app", name, "inflight", n)
 		return ErrBusy
 	}
 	inst := a.inst

@@ -25,11 +25,19 @@ register_app() { # <name> — register against the gate golden image (idempotent
     "{\"name\":\"$name\",\"golden\":\"$GOLDEN\",\"vcpus\":1,\"mem_mib\":512,\"guest_port\":8000}" >/dev/null
 }
 
-freeze_app() { # <name> — freeze and assert it landed
-  local name=$1 state
-  admin POST "/v1/apps/$name/freeze" >/dev/null
-  state=$(app_state "$name")
-  [ "$state" = FROZEN ] || { echo "FATAL: $name is $state after freeze, want FROZEN" >&2; return 1; }
+freeze_app() { # <name> — drive to FROZEN, retrying through transient 409s.
+  # A freeze issued immediately after a request can race the router's
+  # in-flight accounting (409 busy), or find the idle janitor's own freeze
+  # already running (state SNAPSHOTTING). Both resolve in seconds; what the
+  # gate needs is the postcondition, so poll for it.
+  local name=$1 i
+  for i in $(seq 1 30); do
+    admin POST "/v1/apps/$name/freeze" >/dev/null 2>&1 || true
+    [ "$(app_state "$name")" = FROZEN ] && return 0
+    sleep 0.5
+  done
+  echo "FATAL: $name never reached FROZEN" >&2
+  return 1
 }
 
 wait_state() { # <app> <state> <timeout_s> — poll until the app reaches a state
