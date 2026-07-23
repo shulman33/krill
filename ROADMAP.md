@@ -1,10 +1,10 @@
 # ROADMAP — The Sleeping Cloud
 
-*Written 2026-07-23. This is the cross-session continuity document: a fresh
-Claude Code session (or a future Sam) should be able to read CLAUDE.md, then
-this file, and start productive work with zero rediscovery. Update the
-"Current state" and "Next action" sections at the end of any session that
-changes them.*
+*Written 2026-07-23; last updated 2026-07-23 (M2 accepted). This is the
+cross-session continuity document: a fresh Claude Code session (or a future
+Sam) should be able to read CLAUDE.md, then this file, and start productive
+work with zero rediscovery. Update the "Current state" and "Next action"
+sections at the end of any session that changes them.*
 
 ---
 
@@ -144,13 +144,29 @@ configs still fail (a CI badge that says "protocol model-checked" is gold).
   zero lost acked-before-sleep writes.
 - A4: 10 different apps resident as snapshots on one host, any wakeable.
 
-### M2 — the deploy path (~1–2 weeks)
+### M2 — the deploy path — ✅ DONE 2026-07-23 (single session)
 
-MCP server + CLI: directory → Docker build → ext4 rootfs (port
-`wake-bench/lib.sh:image_to_ext4`) → registered app → URL printed. Gate:
-Claude Code deploys and iterates on a real app with one tool call.
-Feedback loop: `logs` tool returns structured runtime errors so the agent
-can self-heal.
+**All four pre-registered gates PASS on GCP nested virt**
+(`m2-gates/RESULTS-2026-07-23-nested.md`): B1 one-command deploy of a plain
+Dockerfile dir → verified-ready in 22 s cold cache / 4 s warm; B2 redeploy
+6 s with stale-snapshot-never-serves and data-reset asserted; B3 broken app
+returns its Python traceback structured **in the deploy response** (and via
+the logs tool); B4 one MCP `tools/call deploy` → URL + ready end to end.
+
+What was built: server-side build pipeline in krilld
+(`POST /v1/apps/{name}/deploy` takes a tar.gz context: docker build →
+docker export → `mkfs.ext4 -d`, no loop mounts; generated `/krill-init.sh`
+satisfies the network contract and execs the image CMD), deploy responses
+that verify by waking the app once, `GET .../logs` with structured error
+parsing (`internal/guestlog`), the `krill` CLI, and the TypeScript MCP
+server (`mcp/`) with deploy/logs/apps/delete_app tools.
+
+Two contracts worth remembering: **redeploy resets app data** (disk rebuilt
+from the new golden — durable data is M3's job), and apps keep their subnet
+(and IP) across redeploys. Big hardware finding: the Firecracker CI kernel
+has `CONFIG_IP_PNP`, so krilld's `ip=` boot arg configures eth0 before
+userspace — **images need no iproute2, arbitrary Dockerfiles deploy
+unmodified** (the generated init's `ip`-if-present path is a fallback).
 
 ### M3 — the data plane (~2–3 weeks, the crown jewel)
 
@@ -229,6 +245,24 @@ M1-session gotchas (2026-07-23, hardware-verified — details and raw data in
   saves ~32 MB/app stored, with zero wake-latency cost for this guest.
   Default stays on; `--snapshot-balloon=false` exists.
 
+M2-session gotchas (2026-07-23, hardware-verified — details in
+`m2-gates/RESULTS-2026-07-23-nested.md`):
+
+- **Kernel `ip=` autoconfig is real and load-bearing.** The FC CI kernel has
+  `CONFIG_IP_PNP`; krilld appends `ip=<guest>::<gw>:<mask>::eth0:off` to
+  every boot, so guests without iproute2 still meet the network contract.
+  If the kernel ever changes, re-run `m2-gates/90-info-noiproute2.sh` —
+  a kernel without IP_PNP silently breaks every iproute2-less image.
+- **Go's `flag` stops at the first positional arg** — `krill deploy dir
+  --json` ignored `--json` and cost the first B1 run. `parseFlexible` in
+  cmd/krill is the fix; keep using it for new commands.
+- **Redeploy resets app data by design** (B2 asserts it). Do not "fix" this
+  before M3 — a redeploy that preserved the old disk would un-pair disk and
+  snapshot lineage.
+- **`mkfs.ext4 -d` replaces the whole mount/copy/umount dance** — no loop
+  devices, nothing to leak on a crashed build. Needs root for ownership
+  preservation, which krilld has anyway.
+
 Session-level gotchas not recorded elsewhere:
 
 1. **GCP capacity**: n2-standard-16 + Local SSD was exhausted across ALL of
@@ -260,20 +294,20 @@ Session-level gotchas not recorded elsewhere:
 
 ## Current state / next action
 
-- **Current state:** **M1 COMPLETE (2026-07-23).** `krilld` implemented in Go
-  (registry / Firecracker driver / lifecycle / wake router / network +
-  rootfs managers; 60+ unit tests, race-clean) and all four A1–A4 gates
-  PASSED on GCP nested virt (`m1-gates/RESULTS-2026-07-23-nested.md`).
-  Git repo exists locally with clean history; TLC CI + Go CI workflows
-  committed; README with badges ready. GCP swept to zero billing resources.
-- **Blocked on Sam (one command):** GitHub repo creation was
-  permission-blocked for the agent — run
-  `gh repo create krill --public --source=. --push` from the repo root
-  (authed as shulman33), which publishes the repo and lights the CI badges.
-- **Next action:** M2 — the deploy path (MCP server + CLI: directory →
-  Docker build → ext4 rootfs → registered app → URL; port
-  `wake-bench/lib.sh:image_to_ext4`; the M1 network contract means the
-  builder injects an init that reads `krill_ip=`/`krill_gw=`). Also queued:
-  the ~200 ms guest-userspace wake-tax investigation (see gotchas) and the
-  three blog posts, which now have a fourth candidate (the wake-tax hunt:
-  tcpdump-on-a-tap bisection of daemon vs guest).
+- **Current state:** **M1 + M2 COMPLETE (both 2026-07-23).** `krilld` (Go)
+  passed A1–A4; the deploy path passed B1–B4 on GCP nested virt
+  (`m2-gates/RESULTS-2026-07-23-nested.md`): admin deploy endpoint
+  (tar.gz → docker build → mkfs.ext4 -d → registered app, verified by a
+  wake, structured errors in the response), `internal/guestlog`,
+  `krill` CLI, TypeScript MCP server in `mcp/` (deploy/logs/apps/
+  delete_app). GitHub repo `shulman33/krill` exists (origin/main); Go +
+  protocol + mcp CI workflows committed. GCP swept to zero billing
+  resources (M2 hardware run ≈ $0.60).
+- **Next action:** M3 — the data plane (the crown jewel): host-side SQLite
+  WAL tailing, epoch stamping, segment shipping with manifest CAS, E1–E6 as
+  code, TLA+ spec as test oracle via a deterministic-simulation harness.
+  Remember the tripwire: any protocol change is spec-first + TLC + both
+  HTML docs + republish. Also queued: the ~200 ms guest-userspace wake-tax
+  investigation (see gotchas) and the blog posts (three written in session
+  history + the wake-tax hunt as a fourth candidate). Push commits to
+  origin at session end (`git push`) so CI badges stay live.

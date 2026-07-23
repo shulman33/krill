@@ -15,8 +15,9 @@ real technology, not wrappers.
 continuity document: current state, decision log, milestones M1–M5 with
 acceptance gates, open decisions, and the resume protocol. Update its
 "Current state / next action" section at the end of any session that changes
-them. **M1 is complete (2026-07-23): `krilld` exists in Go and all four
-A1–A4 gates passed on hardware.** Next: M2, the deploy path.
+them. **M1 and M2 are complete (2026-07-23): `krilld` exists in Go (A1–A4
+passed on hardware) and the deploy path — admin deploy endpoint, `krill`
+CLI, MCP server — passed B1–B4 on hardware.** Next: M3, the data plane.
 
 ## Repository map
 
@@ -29,8 +30,11 @@ A1–A4 gates passed on hardware.** Next: M2, the deploy path.
 | `docs/sleeping-cloud-explained.html` | Plain-English explainer for non-engineers — no protocol identifiers, but its analogies (deli ticket = epoch, notebook = per-app SQLite, journal = WAL) and headline numbers mirror the technical docs; update it when those change materially. |
 | `wake-path-benchmark.md` | 3-day hardware benchmark plan with pass/fail gates G1–G5. |
 | `wake-bench/` | Runnable scripts for that plan — two-tier cloud (GCP nested-virt first, EC2 `.metal` spot only on escalation); follow `wake-bench/README.md`. **Tier 1 ran 2026-07-23: G1/G2/G3/G5 pass, G4 escalates at N=50 only — decision: commit.** Results: `wake-bench/RESULTS-2026-07-23-nested.md` + raw data alongside it. |
-| `cmd/krilld/` + `internal/` | **The product (M1).** Go host agent: `registry` (SQLite catalog, /30 allocation), `firecracker` (test-pinned API driver), `lifecycle` (state machine + single-flight wakes + janitor + crash reconcile), `router` (wake-on-request proxy, D2), `network`/`rootfs` (taps + deterministic MACs / golden + persistent disks), `admin` (loopback control API), `host` (composition). `make test`, `make krilld-linux`. |
+| `cmd/krilld/` + `internal/` | **The product (M1+M2).** Go host agent: `registry` (SQLite catalog, /30 allocation), `firecracker` (test-pinned API driver), `lifecycle` (state machine + single-flight wakes + janitor + crash reconcile + DEPLOYING redeploy path), `router` (wake-on-request proxy, D2), `network`/`rootfs` (taps + deterministic MACs / golden + persistent disks, atomic golden replace), `builder` (M2: tar context → docker build → `mkfs.ext4 -d` → generated init), `guestlog` (serial log → structured errors), `admin` (loopback control API incl. deploy/logs), `host` (composition). `make test`, `make krilld-linux krill-linux`. |
+| `cmd/krill/` | The CLI: `deploy` (dir → URL, verified), `apps/status/logs/wake/freeze/delete`. Thin admin-API client; flags parse in any position (`parseFlexible`). |
+| `mcp/` | TypeScript MCP server (the ROADMAP's language decision): `deploy`/`logs`/`apps`/`delete_app` tools over stdio, thin client of the admin API. `npm install && npm run build` → `dist/index.js`; see `mcp/README.md` for `claude mcp add`. |
 | `m1-gates/` | Runnable A1–A4 acceptance gates for krilld + the SQLite gate guest. **Ran 2026-07-23 on nested virt: all four PASS** — `m1-gates/RESULTS-2026-07-23-nested.md` (includes the wake-latency breakdown: ~45 ms daemon, ~200 ms guest-userspace tax). |
+| `m2-gates/` | Runnable B1–B4 deploy-path gates + example apps + the B4 stdio MCP driver. **Ran 2026-07-23 on nested virt: all four PASS** — `m2-gates/RESULTS-2026-07-23-nested.md` (incl. the kernel `ip=` autoconfig finding: images need no iproute2). |
 | `ci/check-protocol.sh` + `.github/workflows/` | CI: TLC positive + 3 negative configs on every protocol touch; Go vet/race-test/cross-compile on every code touch. |
 
 Published artifact URLs (private; update in place, never mint new URLs):
