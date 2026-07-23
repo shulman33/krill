@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/shulman33/krill/internal/admin"
+	"github.com/shulman33/krill/internal/builder"
 	"github.com/shulman33/krill/internal/config"
 	"github.com/shulman33/krill/internal/host"
 	"github.com/shulman33/krill/internal/lifecycle"
@@ -39,8 +40,10 @@ func run() error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
-	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "apps"), 0o755); err != nil {
-		return err
+	for _, d := range []string{"apps", "build"} {
+		if err := os.MkdirAll(filepath.Join(cfg.DataDir, d), 0o755); err != nil {
+			return err
+		}
 	}
 	reg, err := registry.Open(filepath.Join(cfg.DataDir, "krill.db"))
 	if err != nil {
@@ -64,8 +67,14 @@ func run() error {
 	defer stop()
 	go sup.RunJanitor(ctx)
 
+	bld := builder.New(cfg.DockerBin, filepath.Join(cfg.DataDir, "build"))
 	appSrv := &http.Server{Addr: cfg.ListenAddr, Handler: router.New(sup, log)}
-	admSrv := &http.Server{Addr: cfg.AdminAddr, Handler: admin.New(sup, log)}
+	admSrv := &http.Server{Addr: cfg.AdminAddr, Handler: admin.New(sup, bld, admin.DeployConfig{
+		WorkDir:      filepath.Join(cfg.DataDir, "build"),
+		BaseHost:     cfg.BaseHost,
+		RouterAddr:   cfg.ListenAddr,
+		BuildTimeout: cfg.BuildTimeout,
+	}, log)}
 	errCh := make(chan error, 2)
 	go func() { errCh <- serve(appSrv, "router", log) }()
 	go func() { errCh <- serve(admSrv, "admin", log) }()

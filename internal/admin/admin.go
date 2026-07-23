@@ -1,9 +1,11 @@
 // Package admin is krilld's control API. It binds to loopback by default:
-// anything that can reach it can register and delete apps.
+// anything that can reach it can register, deploy and delete apps.
 //
 //	POST   /v1/apps                {name, golden, vcpus?, mem_mib?, guest_port?, kernel?, boot_args?}
 //	GET    /v1/apps
 //	GET    /v1/apps/{name}
+//	POST   /v1/apps/{name}/deploy  body: tar.gz build context (M2 deploy path)
+//	GET    /v1/apps/{name}/logs    ?tail=N — serial tail + structured errors
 //	POST   /v1/apps/{name}/wake
 //	POST   /v1/apps/{name}/freeze
 //	DELETE /v1/apps/{name}
@@ -13,26 +15,62 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/shulman33/krill/internal/builder"
+	"github.com/shulman33/krill/internal/guestlog"
 	"github.com/shulman33/krill/internal/lifecycle"
 	"github.com/shulman33/krill/internal/registry"
 )
 
+// maxContextBytes bounds an uploaded build context. Small software.
+const maxContextBytes = 512 << 20
+
+// ImageBuilder is what the deploy endpoint needs from internal/builder;
+// tests substitute a fake so no docker is required.
+type ImageBuilder interface {
+	Build(ctx context.Context, name, contextDir string, sizeMB int) (*builder.Result, error)
+}
+
+// DeployConfig is the slice of daemon config the deploy path uses.
+type DeployConfig struct {
+	// WorkDir holds uploaded build contexts while they build.
+	WorkDir string
+	// BaseHost and RouterAddr shape the printed URL:
+	// http://<app>.<BaseHost>:<router port>/
+	BaseHost   string
+	RouterAddr string
+	// BuildTimeout bounds one build; VerifyTimeout bounds the post-deploy
+	// wake that proves the app actually boots.
+	BuildTimeout  time.Duration
+	VerifyTimeout time.Duration
+}
+
 type Server struct {
 	sup *lifecycle.Supervisor
+	bld ImageBuilder
+	dep DeployConfig
 	log *slog.Logger
 }
 
-func New(sup *lifecycle.Supervisor, log *slog.Logger) *Server {
+func New(sup *lifecycle.Supervisor, bld ImageBuilder, dep DeployConfig, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{sup: sup, log: log}
+	if dep.VerifyTimeout == 0 {
+		dep.VerifyTimeout = 60 * time.Second
+	}
+	return &Server{sup: sup, bld: bld, dep: dep, log: log}
 }
 
 type registerReq struct {
@@ -72,9 +110,210 @@ func (s *Server) appRoute(w http.ResponseWriter, r *http.Request, rest string) {
 		s.wake(w, r, name)
 	case action == "freeze" && r.Method == http.MethodPost:
 		s.freeze(w, name)
+	case action == "deploy" && r.Method == http.MethodPost:
+		s.deploy(w, r, name)
+	case action == "logs" && r.Method == http.MethodGet:
+		s.logs(w, r, name)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// deployResp is the deploy tool's whole feedback loop in one payload: where
+// the app lives, whether it actually boots, and if not, why.
+type deployResp struct {
+	App     lifecycle.Status `json:"app"`
+	URL     string           `json:"url"`
+	Created bool             `json:"created"`
+	// Ready reports the post-deploy verification wake: the app booted and
+	// accepted a TCP connection. false + Errors = the self-heal loop.
+	Ready     bool             `json:"ready"`
+	WakeError string           `json:"wake_error,omitempty"`
+	Errors    []guestlog.Error `json:"errors,omitempty"`
+	SizeMB    int              `json:"size_mb"`
+	Warnings  []string         `json:"warnings,omitempty"`
+	BuildSecs float64          `json:"build_secs"`
+	CurlHint  string           `json:"curl_hint"`
+}
+
+func (s *Server) deploy(w http.ResponseWriter, r *http.Request, name string) {
+	if !registry.ValidName(name) {
+		fail(w, http.StatusBadRequest, fmt.Errorf("invalid app name %q (need a DNS label)", name))
+		return
+	}
+	q := r.URL.Query()
+	vcpus := intParam(q.Get("vcpus"), 0)
+	memMiB := intParam(q.Get("mem_mib"), 0)
+	guestPort := intParam(q.Get("guest_port"), 0)
+	sizeMB := intParam(q.Get("size_mb"), 0)
+	verify := q.Get("verify") != "false"
+
+	ctxDir, err := os.MkdirTemp(s.dep.WorkDir, "ctx-"+name+"-")
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer os.RemoveAll(ctxDir)
+	body := http.MaxBytesReader(w, r.Body, maxContextBytes)
+	if err := builder.ExtractTarGz(body, ctxDir); err != nil {
+		fail(w, http.StatusBadRequest, fmt.Errorf("unpacking build context: %w", err))
+		return
+	}
+
+	start := time.Now()
+	bctx, cancel := context.WithTimeout(r.Context(), s.dep.BuildTimeout)
+	defer cancel()
+	res, err := s.bld.Build(bctx, name, ctxDir, sizeMB)
+	if err != nil {
+		var be *builder.BuildError
+		if errors.As(err, &be) {
+			reply(w, http.StatusUnprocessableEntity, map[string]any{
+				"error":     be.Error(),
+				"stage":     be.Stage,
+				"build_log": be.Log,
+			})
+			return
+		}
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer res.Cleanup()
+	buildSecs := time.Since(start).Seconds()
+
+	// Missing knobs inherit the app's current values on redeploy, defaults on
+	// first deploy. Port preference: explicit flag > EXPOSE > previous > 8000.
+	prev, prevErr := s.sup.Status(name)
+	if vcpus == 0 {
+		vcpus = statusOr(prevErr, prev.VCPUs, 1)
+	}
+	if memMiB == 0 {
+		memMiB = statusOr(prevErr, prev.MemMiB, 512)
+	}
+	if guestPort == 0 {
+		guestPort = res.GuestPort
+	}
+	if guestPort == 0 {
+		guestPort = statusOr(prevErr, prev.GuestPort, 8000)
+	}
+
+	meta, created, err := s.sup.Deploy(r.Context(), registry.App{
+		Name:      name,
+		VCPUs:     vcpus,
+		MemMiB:    memMiB,
+		GuestPort: guestPort,
+		BootArgs:  builder.BootArgs,
+	}, res.GoldenPath)
+	if err != nil {
+		fail(w, statusFor(err), err)
+		return
+	}
+
+	resp := deployResp{
+		Created:  created,
+		SizeMB:   res.SizeMB,
+		Warnings: res.Warnings,
+		URL:      s.appURL(meta.Name),
+		CurlHint: s.curlHint(meta.Name),
+	}
+	resp.BuildSecs = float64(int(buildSecs*10)) / 10
+
+	if verify {
+		vctx, vcancel := context.WithTimeout(context.Background(), s.dep.VerifyTimeout)
+		_, release, err := s.sup.Acquire(vctx, meta.Name)
+		vcancel()
+		if err == nil {
+			release()
+			resp.Ready = true
+		} else {
+			resp.WakeError = err.Error()
+			resp.Errors = s.guestErrors(meta.Name)
+		}
+	}
+	resp.App, _ = s.sup.Status(meta.Name)
+	code := http.StatusCreated
+	if !created {
+		code = http.StatusOK
+	}
+	reply(w, code, resp)
+}
+
+func (s *Server) logs(w http.ResponseWriter, r *http.Request, name string) {
+	tail := intParam(r.URL.Query().Get("tail"), 100)
+	path, err := s.sup.SerialLogPath(name)
+	if err != nil {
+		fail(w, statusFor(err), err)
+		return
+	}
+	// Parse over a wider window than we return: the traceback that matters
+	// may sit just above the requested tail.
+	window := tail
+	if window < 500 {
+		window = 500
+	}
+	lines, err := guestlog.TailFile(path, window)
+	if err != nil {
+		fail(w, http.StatusInternalServerError, err)
+		return
+	}
+	errs := guestlog.Parse(lines)
+	if len(lines) > tail {
+		lines = lines[len(lines)-tail:]
+	}
+	reply(w, http.StatusOK, map[string]any{"lines": lines, "errors": errs})
+}
+
+func (s *Server) guestErrors(name string) []guestlog.Error {
+	path, err := s.sup.SerialLogPath(name)
+	if err != nil {
+		return nil
+	}
+	lines, err := guestlog.TailFile(path, 500)
+	if err != nil {
+		return nil
+	}
+	return guestlog.Parse(lines)
+}
+
+func (s *Server) appURL(name string) string {
+	host := name + "." + s.dep.BaseHost
+	if p := routerPort(s.dep.RouterAddr); p != "" && p != "80" {
+		host = net.JoinHostPort(host, p)
+	}
+	return "http://" + host + "/"
+}
+
+func (s *Server) curlHint(name string) string {
+	port := routerPort(s.dep.RouterAddr)
+	if port == "" {
+		port = "80"
+	}
+	return fmt.Sprintf("curl -H 'Host: %s.%s' http://<router-host>:%s/", name, s.dep.BaseHost, port)
+}
+
+func routerPort(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return ""
+	}
+	return port
+}
+
+func intParam(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func statusOr(err error, val, def int) int {
+	if err != nil || val == 0 {
+		return def
+	}
+	return val
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {

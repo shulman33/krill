@@ -601,6 +601,7 @@ type Status struct {
 	SnapshotValid bool      `json:"snapshot_valid"`
 	SubnetIdx     int       `json:"subnet_idx"`
 	GuestAddr     string    `json:"guest_addr"`
+	GuestPort     int       `json:"guest_port"`
 	VCPUs         int       `json:"vcpus"`
 	MemMiB        int       `json:"mem_mib"`
 	Inflight      int       `json:"inflight"`
@@ -621,6 +622,7 @@ func (s *Supervisor) Status(name string) (Status, error) {
 		SnapshotValid: meta.SnapshotValid,
 		SubnetIdx:     meta.SubnetIdx,
 		GuestAddr:     s.be.GuestAddr(meta),
+		GuestPort:     meta.GuestPort,
 		VCPUs:         meta.VCPUs,
 		MemMiB:        meta.MemMiB,
 		Inflight:      a.inflight,

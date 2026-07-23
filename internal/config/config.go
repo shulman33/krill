@@ -25,6 +25,15 @@ type Config struct {
 	// FirecrackerBin is the firecracker binary to spawn per microVM.
 	FirecrackerBin string
 
+	// BaseHost is the domain apps hang off: app "counter" serves at
+	// counter.<BaseHost> through the router. Point a wildcard DNS record (or
+	// /etc/hosts entries) at the router and printed URLs become clickable.
+	BaseHost string
+	// DockerBin builds deploy contexts into images (M2 deploy path).
+	DockerBin string
+	// BuildTimeout bounds one deploy build: docker build + export + mkfs.
+	BuildTimeout time.Duration
+
 	// IdleTimeout demotes ACTIVE apps to FROZEN after this much time with no
 	// requests. The whole economic argument lives in this number.
 	IdleTimeout time.Duration
@@ -47,11 +56,14 @@ type Config struct {
 
 func Default() Config {
 	return Config{
-		DataDir:        "/srv/krill",
-		ListenAddr:     ":8080",
-		AdminAddr:      "127.0.0.1:9091",
-		KernelPath:     "/srv/fc/vmlinux",
-		FirecrackerBin: "firecracker",
+		DataDir:         "/srv/krill",
+		ListenAddr:      ":8080",
+		AdminAddr:       "127.0.0.1:9091",
+		KernelPath:      "/srv/fc/vmlinux",
+		FirecrackerBin:  "firecracker",
+		BaseHost:        "krill.local",
+		DockerBin:       "docker",
+		BuildTimeout:    10 * time.Minute,
 		IdleTimeout:     60 * time.Second,
 		WakeTimeout:     30 * time.Second,
 		SnapshotBalloon: true,
@@ -67,6 +79,9 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.AdminAddr, "admin", c.AdminAddr, "address for the control API (keep on loopback)")
 	fs.StringVar(&c.KernelPath, "kernel", c.KernelPath, "default guest kernel (uncompressed vmlinux)")
 	fs.StringVar(&c.FirecrackerBin, "firecracker", c.FirecrackerBin, "firecracker binary")
+	fs.StringVar(&c.BaseHost, "base-host", c.BaseHost, "domain apps serve under (<app>.<base-host>)")
+	fs.StringVar(&c.DockerBin, "docker", c.DockerBin, "docker binary for deploy builds")
+	fs.DurationVar(&c.BuildTimeout, "build-timeout", c.BuildTimeout, "max time for one deploy build")
 	fs.DurationVar(&c.IdleTimeout, "idle-timeout", c.IdleTimeout, "idle time before an ACTIVE app is frozen")
 	fs.DurationVar(&c.WakeTimeout, "wake-timeout", c.WakeTimeout, "max time for one boot/restore incl. readiness")
 	fs.BoolVar(&c.SnapshotBalloon, "snapshot-balloon", c.SnapshotBalloon, "balloon-reclaim guest RAM before snapshotting (smaller snapshots, slower first wake)")
