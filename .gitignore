@@ -14,6 +14,13 @@ states/
 m1-gates/krilld
 *.test
 
+# Node (MCP server)
+mcp/node_modules/
+mcp/dist/
+
+# M2 gate artifacts
+m2-gates/results/
+
 # Big binary artifacts that never belong in git
 *.ext4
 *.img

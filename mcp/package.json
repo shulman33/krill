@@ -1,0 +1,22 @@
+{
+  "name": "krill-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Krill: deploy a directory as a scale-to-zero microVM app in one tool call",
+  "type": "module",
+  "bin": { "krill-mcp": "dist/index.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "tar": "^7.4.3",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
