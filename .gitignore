@@ -19,3 +19,4 @@ krilld
 vmstate
 mem
 *.log
+m1-gates/results/
