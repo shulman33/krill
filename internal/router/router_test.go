@@ -21,16 +21,16 @@ import (
 
 func TestAppName(t *testing.T) {
 	cases := map[string]string{
-		"counter.localhost:8080":      "counter",
-		"counter.krill.example.com":   "counter",
-		"counter.localhost":           "counter",
-		"localhost:8080":              "",
-		"localhost":                   "",
-		"127.0.0.1:8080":              "",
-		"[::1]:8080":                  "",
-		"Bad_Name.localhost":          "",
-		"":                            "",
-		"a.b":                         "a",
+		"counter.localhost:8080":    "counter",
+		"counter.krill.example.com": "counter",
+		"counter.localhost":         "counter",
+		"localhost:8080":            "",
+		"localhost":                 "",
+		"127.0.0.1:8080":            "",
+		"[::1]:8080":                "",
+		"Bad_Name.localhost":        "",
+		"":                          "",
+		"a.b":                       "a",
 	}
 	for host, want := range cases {
 		if got := appName(host); got != want {
@@ -94,7 +94,9 @@ func (b *echoBackend) GuestAddr(a registry.App) string {
 	}
 	return "127.0.0.1:1"
 }
-func (b *echoBackend) Purge(registry.App) error { return nil }
+func (b *echoBackend) Purge(registry.App) error            { return nil }
+func (b *echoBackend) Replace(registry.App, string) error  { return nil }
+func (b *echoBackend) SerialLogPath(a registry.App) string { return "/tmp/echo-" + a.Name + ".log" }
 
 func setup(t *testing.T) (*httptest.Server, *lifecycle.Supervisor) {
 	t.Helper()

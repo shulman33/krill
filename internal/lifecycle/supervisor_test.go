@@ -30,7 +30,11 @@ type fakeBackend struct {
 	failColdBoot bool
 	failRestore  bool
 	failSnapshot bool
+	failReplace  bool
 	onColdBoot   func(app registry.App) // ordering-assertion hook
+	replaceHook  func()                 // runs at the top of Replace
+
+	goldens map[string]string // app -> last installed golden source
 }
 
 type fakeInstance struct {
@@ -43,7 +47,7 @@ func (i *fakeInstance) Kill() {
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{addrs: map[string]string{}, snapshots: map[string]bool{}}
+	return &fakeBackend{addrs: map[string]string{}, snapshots: map[string]bool{}, goldens: map[string]string{}}
 }
 
 func (b *fakeBackend) spawn(app registry.App) (Instance, error) {
@@ -61,8 +65,31 @@ func (b *fakeBackend) spawn(app registry.App) (Instance, error) {
 	return &fakeInstance{srv: srv, ln: ln}, nil
 }
 
-func (b *fakeBackend) Install(app registry.App, goldenSrc string) error { return nil }
-func (b *fakeBackend) Prepare(app registry.App) error                   { return nil }
+func (b *fakeBackend) Install(app registry.App, goldenSrc string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.goldens[app.Name] = goldenSrc
+	return nil
+}
+func (b *fakeBackend) Prepare(app registry.App) error { return nil }
+
+func (b *fakeBackend) Replace(app registry.App, goldenSrc string) error {
+	if b.replaceHook != nil {
+		b.replaceHook()
+	}
+	if b.failReplace {
+		return errors.New("injected replace failure")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.goldens[app.Name] = goldenSrc
+	delete(b.snapshots, app.Name) // snapshot files dropped with the old disk
+	return nil
+}
+
+func (b *fakeBackend) SerialLogPath(app registry.App) string {
+	return "/tmp/fake-serial-" + app.Name + ".log"
+}
 
 func (b *fakeBackend) HasSnapshot(app registry.App) bool {
 	b.mu.Lock()
@@ -467,6 +494,143 @@ func TestDeleteLifecycle(t *testing.T) {
 	}
 	if _, _, err := sup.Acquire(context.Background(), "doomed"); !errors.Is(err, registry.ErrNotFound) {
 		t.Fatalf("acquire after delete: want ErrNotFound, got %v", err)
+	}
+}
+
+func TestDeployNewAppRegisters(t *testing.T) {
+	be := newFakeBackend()
+	sup, _ := newSupervisor(t, be, Config{})
+	meta, created, err := sup.Deploy(context.Background(), registry.App{
+		Name: "fresh", VCPUs: 1, MemMiB: 512, GuestPort: 8000,
+	}, "golden-v1")
+	if err != nil || !created {
+		t.Fatalf("deploy new: created=%v err=%v", created, err)
+	}
+	if be.goldens["fresh"] != "golden-v1" {
+		t.Fatalf("golden = %q", be.goldens["fresh"])
+	}
+	if st, _ := sup.Status("fresh"); st.State != StateCold {
+		t.Fatalf("state = %s, want COLD", st.State)
+	}
+	if meta.SubnetIdx != 0 {
+		t.Fatalf("subnet = %d", meta.SubnetIdx)
+	}
+}
+
+func TestRedeployFrozenAppKillsSnapshotAndColdBootsNewCode(t *testing.T) {
+	be := newFakeBackend()
+	sup, reg := newSupervisor(t, be, Config{})
+	spec := registry.App{Name: "app", VCPUs: 1, MemMiB: 512, GuestPort: 8000}
+	if _, _, err := sup.Deploy(context.Background(), spec, "golden-v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Boot and freeze v1 so a snapshot exists and is valid.
+	_, release, _ := sup.Acquire(context.Background(), "app")
+	release()
+	if err := sup.Freeze("app"); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := reg.Get("app"); !m.SnapshotValid {
+		t.Fatal("precondition: v1 snapshot valid")
+	}
+
+	// Redeploy v2 with different resources.
+	spec.MemMiB = 1024
+	meta, created, err := sup.Deploy(context.Background(), spec, "golden-v2")
+	if err != nil || created {
+		t.Fatalf("redeploy: created=%v err=%v", created, err)
+	}
+	if meta.MemMiB != 1024 || meta.SubnetIdx != 0 {
+		t.Fatalf("spec not updated or subnet moved: %+v", meta)
+	}
+	if be.goldens["app"] != "golden-v2" {
+		t.Fatalf("golden = %q", be.goldens["app"])
+	}
+	if m, _ := reg.Get("app"); m.SnapshotValid || m.State != "COLD" {
+		t.Fatalf("after redeploy: valid=%v state=%s, want false/COLD", m.SnapshotValid, m.State)
+	}
+
+	// The v1 snapshot must never serve: next touch is a cold boot of v2.
+	_, release, err = sup.Acquire(context.Background(), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if be.boots.Load() != 2 || be.restores.Load() != 0 {
+		t.Fatalf("boots=%d restores=%d, want 2/0 — a stale snapshot answered", be.boots.Load(), be.restores.Load())
+	}
+}
+
+func TestRedeployActiveAppKillsInstance(t *testing.T) {
+	be := newFakeBackend()
+	sup, _ := newSupervisor(t, be, Config{})
+	spec := registry.App{Name: "app", VCPUs: 1, MemMiB: 512, GuestPort: 8000}
+	sup.Deploy(context.Background(), spec, "v1")
+	_, release, _ := sup.Acquire(context.Background(), "app")
+	release()
+
+	if _, _, err := sup.Deploy(context.Background(), spec, "v2"); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := sup.Status("app"); st.State != StateCold {
+		t.Fatalf("state = %s, want COLD (instance killed)", st.State)
+	}
+	// And it boots the new code on demand.
+	_, release, err := sup.Acquire(context.Background(), "app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if be.boots.Load() != 2 {
+		t.Fatalf("boots = %d, want 2", be.boots.Load())
+	}
+}
+
+func TestAcquireDuringDeployWaitsForNewCode(t *testing.T) {
+	be := newFakeBackend()
+	sup, _ := newSupervisor(t, be, Config{})
+	spec := registry.App{Name: "app", VCPUs: 1, MemMiB: 512, GuestPort: 8000}
+	sup.Deploy(context.Background(), spec, "v1")
+
+	// Hold the app in DEPLOYING via a slow Replace.
+	replaceStarted := make(chan struct{})
+	replaceFinish := make(chan struct{})
+	be.replaceHook = func() {
+		close(replaceStarted)
+		<-replaceFinish
+	}
+
+	deployDone := make(chan error, 1)
+	go func() {
+		_, _, err := sup.Deploy(context.Background(), spec, "v2")
+		deployDone <- err
+	}()
+	<-replaceStarted
+
+	// A request racing the deploy must wait it out, then cold-boot v2.
+	acquired := make(chan error, 1)
+	go func() {
+		_, release, err := sup.Acquire(context.Background(), "app")
+		if err == nil {
+			release()
+		}
+		acquired <- err
+	}()
+	select {
+	case err := <-acquired:
+		t.Fatalf("acquire finished mid-deploy (err=%v)", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(replaceFinish)
+	if err := <-deployDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-acquired; err != nil {
+		t.Fatal(err)
+	}
+	if be.goldens["app"] != "v2" {
+		t.Fatalf("golden = %q, want v2", be.goldens["app"])
 	}
 }
 

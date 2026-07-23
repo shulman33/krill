@@ -56,6 +56,23 @@ func (b *Backend) Install(app registry.App, goldenSrc string) error {
 	return b.net.EnsureTap(b.appNet(app))
 }
 
+// Replace swaps in a new golden and resets disk + snapshot files. The
+// supervisor has already invalidated the snapshot in the registry and
+// guaranteed no instance is running.
+func (b *Backend) Replace(app registry.App, goldenSrc string) error {
+	if err := b.fs.DropSnapshot(app.Name); err != nil {
+		return err
+	}
+	if err := b.fs.InstallGolden(app.Name, goldenSrc); err != nil {
+		return err
+	}
+	return b.fs.ResetDisk(app.Name)
+}
+
+func (b *Backend) SerialLogPath(app registry.App) string {
+	return b.fs.SerialLog(app.Name)
+}
+
 func (b *Backend) Prepare(app registry.App) error {
 	if err := b.fs.EnsureDirs(app.Name); err != nil {
 		return err
@@ -83,7 +100,14 @@ func (b *Backend) bootArgs(app registry.App, n network.AppNet) string {
 	if base == "" {
 		base = DefaultBootArgs
 	}
-	return fmt.Sprintf("%s krill_ip=%s/30 krill_gw=%s", base, n.GuestIP, n.HostIP)
+	// Two ways to satisfy the network contract, guest's choice: krill_ip=/
+	// krill_gw= for an init with an `ip` binary, and kernel-level ip=
+	// autoconfig (CONFIG_IP_PNP) for images without one. A kernel lacking
+	// IP_PNP ignores ip= as an unknown parameter; an init that configured
+	// eth0 already just gets EEXIST from its `ip addr add`. Both are inert
+	// where they don't apply.
+	return fmt.Sprintf("%s krill_ip=%s/30 krill_gw=%s ip=%s::%s:255.255.255.252::eth0:off",
+		base, n.GuestIP, n.HostIP, n.GuestIP, n.HostIP)
 }
 
 func (b *Backend) launch(ctx context.Context) func(app registry.App) (*firecracker.Machine, error) {

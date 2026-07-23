@@ -159,6 +159,29 @@ func (r *Registry) List() ([]App, error) {
 	return out, rows.Err()
 }
 
+// UpdateSpec replaces an app's resources and boot configuration, keeping its
+// identity (name, subnet — a redeployed app keeps its IP, which the M1
+// stale-IP gotcha earned). Same validation as Create.
+func (r *Registry) UpdateSpec(a App) error {
+	if a.VCPUs < 1 || a.MemMiB < 32 || a.GuestPort < 1 || a.GuestPort > 65535 {
+		return fmt.Errorf("invalid resources for %q: need vcpus>=1, mem_mib>=32, guest_port in 1..65535", a.Name)
+	}
+	res, err := r.db.Exec(`
+		UPDATE apps SET vcpus = ?, mem_mib = ?, guest_port = ?, kernel_path = ?,
+		                boot_args = ?, updated_at = ?
+		WHERE name = ?`,
+		a.VCPUs, a.MemMiB, a.GuestPort, a.KernelPath, a.BootArgs,
+		time.Now().UTC().Format(time.RFC3339Nano), a.Name)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetState persists a lifecycle transition. Snapshot validity is a separate,
 // deliberate call: forgetting it should fail safe (snapshot stays invalid).
 func (r *Registry) SetState(name, state string) error {

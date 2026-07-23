@@ -40,9 +40,9 @@ func (m *Manager) SnapDir(name string) string    { return filepath.Join(m.AppDir
 func (m *Manager) VMStatePath(name string) string {
 	return filepath.Join(m.SnapDir(name), "vmstate")
 }
-func (m *Manager) MemPath(name string) string    { return filepath.Join(m.SnapDir(name), "mem") }
-func (m *Manager) SockPath(name string) string   { return filepath.Join(m.AppDir(name), "fc.sock") }
-func (m *Manager) SerialLog(name string) string  { return filepath.Join(m.AppDir(name), "serial.log") }
+func (m *Manager) MemPath(name string) string   { return filepath.Join(m.SnapDir(name), "mem") }
+func (m *Manager) SockPath(name string) string  { return filepath.Join(m.AppDir(name), "fc.sock") }
+func (m *Manager) SerialLog(name string) string { return filepath.Join(m.AppDir(name), "serial.log") }
 
 // EnsureDirs creates the app's directory tree; idempotent, run on every
 // daemon start (taps and dirs are cheap; golden images are not re-copied).
@@ -57,7 +57,28 @@ func (m *Manager) Register(name, srcPath string) error {
 	if err := m.EnsureDirs(name); err != nil {
 		return err
 	}
-	return copySparse(srcPath, m.GoldenPath(name))
+	return m.InstallGolden(name, srcPath)
+}
+
+// InstallGolden replaces the golden image atomically (copy to a temp name in
+// the same directory, then rename): a crash mid-deploy leaves the old golden
+// intact, never a half-written one.
+func (m *Manager) InstallGolden(name, srcPath string) error {
+	tmp := m.GoldenPath(name) + ".tmp"
+	if err := copySparse(srcPath, tmp); err != nil {
+		return err
+	}
+	return os.Rename(tmp, m.GoldenPath(name))
+}
+
+// ResetDisk deletes the app's live disk so the next boot recreates it from
+// golden. Callers own the ordering: snapshot must already be invalid, no
+// instance may be running.
+func (m *Manager) ResetDisk(name string) error {
+	if err := os.Remove(m.DiskPath(name)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // EnsureDisk guarantees disk.ext4 exists, copying from golden only if the

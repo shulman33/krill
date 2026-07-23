@@ -35,6 +35,7 @@ const (
 	StateActive       State = "ACTIVE"       // guest running, serving
 	StateSnapshotting State = "SNAPSHOTTING" // freeze in flight
 	StateFrozen       State = "FROZEN"       // no process, no RAM; snapshot on disk
+	StateDeploying    State = "DEPLOYING"    // golden/disk being replaced (M2 deploy path)
 )
 
 var (
@@ -66,6 +67,12 @@ type Backend interface {
 	Snapshot(ctx context.Context, app registry.App, inst Instance) error
 	// GuestAddr is the host:port the app serves on (probe + proxy target).
 	GuestAddr(app registry.App) string
+	// Replace swaps in a new golden image and resets the app's disk and
+	// snapshot files. Only called with no instance running and the snapshot
+	// already invalidated in the registry.
+	Replace(app registry.App, goldenSrc string) error
+	// SerialLogPath is where the guest's console output lands (the logs API).
+	SerialLogPath(app registry.App) string
 	// Purge removes all host state for a deleted app.
 	Purge(app registry.App) error
 }
@@ -217,7 +224,7 @@ func (s *Supervisor) Acquire(ctx context.Context, name string) (string, func(), 
 				return "", nil, ctx.Err()
 			}
 
-		case StateSnapshotting:
+		case StateSnapshotting, StateDeploying:
 			ch := a.freezeDone
 			a.mu.Unlock()
 			select {
@@ -444,6 +451,113 @@ func (s *Supervisor) Register(spec registry.App, goldenSrc string) (registry.App
 	return meta, nil
 }
 
+// Deploy is the M2 path: install a freshly built golden image under a name.
+// A new name registers; an existing name is redeployed in place — same
+// subnet, same IP, new code, reset disk. Returns the app and whether it was
+// created (vs replaced).
+//
+// Redeploy resets the app's disk: whatever the old code wrote is gone. That
+// is the documented M2 contract — durable app data is the data plane's job
+// (M3), not the deploy path's.
+func (s *Supervisor) Deploy(ctx context.Context, spec registry.App, goldenSrc string) (registry.App, bool, error) {
+	if _, err := s.reg.Get(spec.Name); errors.Is(err, registry.ErrNotFound) {
+		meta, err := s.Register(spec, goldenSrc)
+		return meta, true, err
+	} else if err != nil {
+		return registry.App{}, false, err
+	}
+	meta, err := s.redeploy(ctx, spec, goldenSrc)
+	return meta, false, err
+}
+
+// redeploy claims the app with the DEPLOYING guard state (requests arriving
+// meanwhile wait, then cold-boot the new code), kills any running instance,
+// and replaces golden + disk. In-flight requests lose to a deploy: this is
+// an explicit operator action, and small-software requests are small.
+func (s *Supervisor) redeploy(ctx context.Context, spec registry.App, goldenSrc string) (registry.App, error) {
+	a, _, err := s.app(spec.Name)
+	if err != nil {
+		return registry.App{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.FreezeTimeout+s.cfg.WakeTimeout)
+	defer cancel()
+
+	for {
+		a.mu.Lock()
+		if a.gone {
+			a.mu.Unlock()
+			return registry.App{}, registry.ErrNotFound
+		}
+		var ch chan struct{}
+		switch a.state {
+		case StateBooting, StateWaking:
+			ch = a.wakeDone
+		case StateSnapshotting, StateDeploying:
+			ch = a.freezeDone
+		}
+		if ch == nil {
+			break // quiescent (COLD/FROZEN) or ACTIVE — claimable, still locked
+		}
+		a.mu.Unlock()
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return registry.App{}, fmt.Errorf("deploy %s: app busy: %w", spec.Name, ctx.Err())
+		}
+	}
+	if a.inst != nil {
+		a.inst.Kill()
+		a.inst = nil
+	}
+	a.state = StateDeploying
+	a.freezeDone = make(chan struct{})
+	a.mu.Unlock()
+
+	finish := func() {
+		a.mu.Lock()
+		a.state = StateCold
+		close(a.freezeDone)
+		a.freezeDone = nil
+		a.mu.Unlock()
+		_ = s.reg.SetState(spec.Name, string(StateCold))
+	}
+
+	// Ordering, same rule as everywhere: the pairing bit goes false before
+	// anything can touch golden, disk, or the snapshot files.
+	_ = s.reg.SetState(spec.Name, string(StateDeploying))
+	if err := s.reg.SetSnapshotValid(spec.Name, false); err != nil {
+		finish()
+		return registry.App{}, err
+	}
+	if err := s.reg.UpdateSpec(spec); err != nil {
+		finish()
+		return registry.App{}, err
+	}
+	meta, err := s.reg.Get(spec.Name)
+	if err != nil {
+		finish()
+		return registry.App{}, err
+	}
+	if err := s.be.Replace(meta, goldenSrc); err != nil {
+		// Golden replacement is atomic (old or new, never half): the app is
+		// still bootable, just possibly on the old code. COLD either way.
+		finish()
+		return registry.App{}, fmt.Errorf("replace %s: %w", spec.Name, err)
+	}
+	finish()
+	s.log.Info("redeployed", "app", spec.Name)
+	return meta, nil
+}
+
+// SerialLogPath exposes where an app's console output lives (the logs API).
+func (s *Supervisor) SerialLogPath(name string) (string, error) {
+	meta, err := s.reg.Get(name)
+	if err != nil {
+		return "", err
+	}
+	return s.be.SerialLogPath(meta), nil
+}
+
 // Delete removes an app entirely. A running instance is killed, not frozen —
 // deletion is not a graceful path.
 func (s *Supervisor) Delete(name string) error {
@@ -453,7 +567,7 @@ func (s *Supervisor) Delete(name string) error {
 	}
 	a.mu.Lock()
 	switch a.state {
-	case StateBooting, StateWaking, StateSnapshotting:
+	case StateBooting, StateWaking, StateSnapshotting, StateDeploying:
 		a.mu.Unlock()
 		return ErrBusy
 	case StateActive:
