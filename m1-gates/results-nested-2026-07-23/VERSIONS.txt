@@ -1,0 +1,3 @@
+Firecracker v1.16.1
+Usage of /usr/local/bin/krilld:
+6.17.0-1021-gcp

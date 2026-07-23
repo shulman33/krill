@@ -91,7 +91,18 @@ exists yet. The directory is **not yet a git repository** (fix in M1 step 0).
 Every milestone ends with something demoable. Pre-register acceptance gates
 before building (this discipline made the benchmark trustworthy — keep it).
 
-### M1 — `krilld`, the host agent (~2 weeks) ← NEXT
+### M1 — `krilld`, the host agent — ✅ DONE 2026-07-23 (single session)
+
+**All four pre-registered gates PASS on GCP nested virt** (n2-standard-16,
+us-east1-c, FC v1.16.1): A1 warm-wake p99 298 ms through the router (gate
+≤ 300; krilld's own machinery is ~45 ms of it — see the instrumented
+breakdown in `m1-gates/RESULTS-2026-07-23-nested.md`), A2 unattended
+freeze with the VMM process gone, A3 100 sleep/wake cycles with a gapless
+acked-write ledger, A4 10-app frozen fleet with kernel-assigned-IP identity
+checks. Step 0 (git repo + TLC CI with the three negative configs) is in.
+GitHub repo creation was permission-blocked in-session — run
+`gh repo create krill --public --source=. --push` once, then the CI badges
+go live.
 
 One daemon on one KVM host: register apps, boot Firecracker VMs, snapshot on
 idle, wake on request.
@@ -193,6 +204,31 @@ before debugging anything:
   artifact-republish mechanics (existing URLs, `url:` param from new
   sessions), headline-numbers consistency rule.
 
+M1-session gotchas (2026-07-23, hardware-verified — details and raw data in
+`m1-gates/RESULTS-2026-07-23-nested.md`):
+
+- **The ~200 ms guest-userspace wake tax.** After snapshot/load the guest
+  KERNEL answers TCP in ~13 ms, but python/uvicorn takes ~200 ms to serve
+  the first request (then ~3 ms). Constant per wake; NOT the balloon
+  (falsified with `--snapshot-balloon=false`); NOT pause-duration-dependent.
+  A1 passes with it included, but it's the whole gap to the 115 ms bench
+  number — likely lever: what the guest was doing when snapshotted (bench
+  snapshots followed 20 warm pings; krilld snapshots an idle guest).
+- **Freeze-after-request races in-flight accounting** — drive gates by
+  postcondition (poll for FROZEN), never by one freeze call. In the daemon
+  this is by design: ErrBusy protects in-flight requests.
+- **Subnets are reallocated after delete** — deleting and re-registering an
+  app can move it to a different /30; never assume a guest IP across
+  re-registration (cost 20 min of phantom-bug chasing: direct curls to a
+  stale IP hit a frozen app's tap and ate the full 130 s SYN ladder).
+- **sqlite3 connections are thread-bound** and FastAPI sync endpoints run in
+  a threadpool — gate guest needed `check_same_thread=False` + a lock. Found
+  via per-app `boot_args` with `console=ttyS0` (serial log catches guest
+  tracebacks; that registry column earned its keep day one).
+- **Balloon tradeoff, measured:** reclaim costs ~6 s of freeze time and
+  saves ~32 MB/app stored, with zero wake-latency cost for this guest.
+  Default stays on; `--snapshot-balloon=false` exists.
+
 Session-level gotchas not recorded elsewhere:
 
 1. **GCP capacity**: n2-standard-16 + Local SSD was exhausted across ALL of
@@ -224,10 +260,20 @@ Session-level gotchas not recorded elsewhere:
 
 ## Current state / next action
 
-- **Current state:** design + verification phase complete; benchmark passed;
-  COMMIT decision recorded; name/language/hardware decided (Krill, Go+TS,
-  scripted GCP); no product code; not yet a git repo.
-- **Next action:** M1 step 0 — `git init`, public GitHub repo `krill`, TLC
-  CI action — then the `krilld` scaffold (registry, Firecracker driver,
-  lifecycle state machine, wake-on-request router, network + rootfs
-  managers, against the four pre-registered A1–A4 gates).
+- **Current state:** **M1 COMPLETE (2026-07-23).** `krilld` implemented in Go
+  (registry / Firecracker driver / lifecycle / wake router / network +
+  rootfs managers; 60+ unit tests, race-clean) and all four A1–A4 gates
+  PASSED on GCP nested virt (`m1-gates/RESULTS-2026-07-23-nested.md`).
+  Git repo exists locally with clean history; TLC CI + Go CI workflows
+  committed; README with badges ready. GCP swept to zero billing resources.
+- **Blocked on Sam (one command):** GitHub repo creation was
+  permission-blocked for the agent — run
+  `gh repo create krill --public --source=. --push` from the repo root
+  (authed as shulman33), which publishes the repo and lights the CI badges.
+- **Next action:** M2 — the deploy path (MCP server + CLI: directory →
+  Docker build → ext4 rootfs → registered app → URL; port
+  `wake-bench/lib.sh:image_to_ext4`; the M1 network contract means the
+  builder injects an init that reads `krill_ip=`/`krill_gw=`). Also queued:
+  the ~200 ms guest-userspace wake-tax investigation (see gotchas) and the
+  three blog posts, which now have a fourth candidate (the wake-tax hunt:
+  tcpdump-on-a-tap bisection of daemon vs guest).

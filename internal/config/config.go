@@ -32,6 +32,12 @@ type Config struct {
 	// readiness probing.
 	WakeTimeout time.Duration
 
+	// SnapshotBalloon toggles the balloon inflate/deflate cycle during
+	// freeze. Inflating reclaims guest free pages, shrinking the stored mem
+	// file — but the reclaim also evicts the guest's page cache, which the
+	// first post-restore request pays back as a major-fault storm (~200 ms
+	// measured for a python guest). Density vs first-wake latency, one knob.
+	SnapshotBalloon bool
 	// BalloonSettle is how long the guest gets to reclaim pages after the
 	// balloon inflates during freeze (lib.sh used 5s). DeflateSettle is the
 	// pause after deflating — never pause a VM mid-inflation.
@@ -46,10 +52,11 @@ func Default() Config {
 		AdminAddr:      "127.0.0.1:9091",
 		KernelPath:     "/srv/fc/vmlinux",
 		FirecrackerBin: "firecracker",
-		IdleTimeout:    60 * time.Second,
-		WakeTimeout:    30 * time.Second,
-		BalloonSettle:  5 * time.Second,
-		DeflateSettle:  1 * time.Second,
+		IdleTimeout:     60 * time.Second,
+		WakeTimeout:     30 * time.Second,
+		SnapshotBalloon: true,
+		BalloonSettle:   5 * time.Second,
+		DeflateSettle:   1 * time.Second,
 	}
 }
 
@@ -62,6 +69,7 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.FirecrackerBin, "firecracker", c.FirecrackerBin, "firecracker binary")
 	fs.DurationVar(&c.IdleTimeout, "idle-timeout", c.IdleTimeout, "idle time before an ACTIVE app is frozen")
 	fs.DurationVar(&c.WakeTimeout, "wake-timeout", c.WakeTimeout, "max time for one boot/restore incl. readiness")
+	fs.BoolVar(&c.SnapshotBalloon, "snapshot-balloon", c.SnapshotBalloon, "balloon-reclaim guest RAM before snapshotting (smaller snapshots, slower first wake)")
 	fs.DurationVar(&c.BalloonSettle, "balloon-settle", c.BalloonSettle, "guest reclaim time after balloon inflate")
 	fs.DurationVar(&c.DeflateSettle, "deflate-settle", c.DeflateSettle, "wait after balloon deflate before pausing")
 }

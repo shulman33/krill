@@ -147,21 +147,25 @@ func (b *Backend) Snapshot(ctx context.Context, app registry.App, inst lifecycle
 	if !ok {
 		return fmt.Errorf("instance for %s is not a firecracker machine", app.Name)
 	}
-	// Reclaim target: 3/4 of guest RAM, the benchmark's proven ratio
-	// (384 MiB of 512). The balloon deflates on OOM, so an overshoot
-	// degrades to a smaller reclaim rather than a dead guest.
-	if err := m.SetBalloon(ctx, app.MemMiB*3/4); err != nil {
-		return err
-	}
-	if err := sleepCtx(ctx, b.cfg.BalloonSettle); err != nil {
-		return err
-	}
-	if err := m.SetBalloon(ctx, 0); err != nil {
-		return err
-	}
-	// Never pause a VM mid-inflation.
-	if err := sleepCtx(ctx, b.cfg.DeflateSettle); err != nil {
-		return err
+	if b.cfg.SnapshotBalloon {
+		// Reclaim target: 3/4 of guest RAM, the benchmark's proven ratio
+		// (384 MiB of 512). The balloon deflates on OOM, so an overshoot
+		// degrades to a smaller reclaim rather than a dead guest. The cost:
+		// reclaim evicts guest page cache, and the first post-restore
+		// request pays it back as re-read faults.
+		if err := m.SetBalloon(ctx, app.MemMiB*3/4); err != nil {
+			return err
+		}
+		if err := sleepCtx(ctx, b.cfg.BalloonSettle); err != nil {
+			return err
+		}
+		if err := m.SetBalloon(ctx, 0); err != nil {
+			return err
+		}
+		// Never pause a VM mid-inflation.
+		if err := sleepCtx(ctx, b.cfg.DeflateSettle); err != nil {
+			return err
+		}
 	}
 	if err := m.Pause(ctx); err != nil {
 		return err

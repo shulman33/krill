@@ -73,7 +73,9 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The hold: returns once the app is ACTIVE, waking it if needed.
+	t0 := time.Now()
 	addr, release, err := rt.sup.Acquire(r.Context(), name)
+	acquireDur := time.Since(t0)
 	if err != nil {
 		switch {
 		case errors.Is(err, registry.ErrNotFound):
@@ -106,6 +108,15 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	proxy.ServeHTTP(w, r)
+
+	// Wake-path observability: any request that waited on machinery gets a
+	// breakdown, so a slow wake is attributable (supervisor vs proxy leg)
+	// from the daemon log alone.
+	if total := time.Since(t0); acquireDur > 20*time.Millisecond || total > 150*time.Millisecond {
+		rt.log.Info("slow request", "app", name,
+			"acquire_ms", acquireDur.Milliseconds(),
+			"proxy_ms", (total - acquireDur).Milliseconds())
+	}
 }
 
 // appName extracts the first DNS label from a Host header value. Bare hosts
