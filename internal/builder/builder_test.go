@@ -253,6 +253,38 @@ func TestExtractTarGzRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPackExtractRoundTrip(t *testing.T) {
+	src := t.TempDir()
+	os.MkdirAll(filepath.Join(src, "src"), 0o755)
+	os.MkdirAll(filepath.Join(src, ".git", "objects"), 0o755)
+	os.WriteFile(filepath.Join(src, "Dockerfile"), []byte("FROM x"), 0o644)
+	os.WriteFile(filepath.Join(src, "src/app.py"), []byte("print(1)"), 0o644)
+	os.WriteFile(filepath.Join(src, ".git/objects/junk"), []byte("z"), 0o644)
+	os.WriteFile(filepath.Join(src, "run.sh"), []byte("#!/bin/sh"), 0o755)
+	os.Symlink("src/app.py", filepath.Join(src, "main.py"))
+
+	var buf bytes.Buffer
+	if err := PackTarGz(src, &buf); err != nil {
+		t.Fatal(err)
+	}
+	dst := t.TempDir()
+	if err := ExtractTarGz(&buf, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dst, "src/app.py")); string(got) != "print(1)" {
+		t.Fatalf("content: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dst, ".git")); !os.IsNotExist(err) {
+		t.Fatal(".git must not travel")
+	}
+	if st, err := os.Stat(filepath.Join(dst, "run.sh")); err != nil || st.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("exec bit lost: %v %v", st, err)
+	}
+	if target, err := os.Readlink(filepath.Join(dst, "main.py")); err != nil || target != "src/app.py" {
+		t.Fatalf("symlink: %q %v", target, err)
+	}
+}
+
 func TestExtractTarGzRejectsEscapes(t *testing.T) {
 	for name, entries := range map[string]map[string]string{
 		"dotdot path":      {"../evil": "x"},

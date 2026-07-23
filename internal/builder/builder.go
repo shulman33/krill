@@ -319,6 +319,69 @@ func autoSizeMB(staging string) int {
 	return mb
 }
 
+// PackTarGz writes dir as a gzipped tar — the client half of the deploy
+// upload, mirrored by ExtractTarGz on the daemon side. .git is skipped
+// (never part of a build context); .dockerignore filtering is docker's job
+// at build time.
+func PackTarGz(dir string, w io.Writer) error {
+	gz := gzip.NewWriter(w)
+	tw := tar.NewWriter(gz)
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		if d.Name() == ".git" && d.IsDir() {
+			return filepath.SkipDir
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case d.IsDir():
+			return tw.WriteHeader(&tar.Header{
+				Name: rel + "/", Typeflag: tar.TypeDir, Mode: int64(info.Mode().Perm()),
+			})
+		case info.Mode()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			return tw.WriteHeader(&tar.Header{
+				Name: rel, Typeflag: tar.TypeSymlink, Linkname: target,
+			})
+		case info.Mode().IsRegular():
+			hdr := &tar.Header{Name: rel, Mode: int64(info.Mode().Perm()), Size: info.Size()}
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(tw, f)
+			f.Close()
+			return err
+		default:
+			return nil // sockets, devices: not build-context material
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	return gz.Close()
+}
+
 // ExtractTarGz unpacks an uploaded build context into dst, refusing paths
 // that escape it. Supports files, dirs, and symlinks (relative, in-tree
 // targets only) — everything a docker build context legitimately contains.
