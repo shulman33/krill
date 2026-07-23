@@ -121,7 +121,9 @@ func (s *FS) Delete(_ context.Context, key string) error {
 // which is the safe failure.
 func (s *FS) write(key string, data []byte, gen int64) error {
 	p := s.path(key)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	// 0700/0600: the store holds app database content (WAL segments,
+	// checkpoint images) — krilld's eyes only, never world-readable.
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
 	if err := renameInto(p, data); err != nil {
@@ -147,7 +149,7 @@ func (s *FS) readGen(key string) (int64, error) {
 
 func renameInto(dst string, data []byte) error {
 	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, dst)
