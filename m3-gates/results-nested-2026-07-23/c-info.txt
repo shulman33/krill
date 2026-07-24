@@ -1,0 +1,2 @@
+C-info: 30 wakes with data plane + sync-ack: p50=205ms max=253ms
+compare: m1-gates A1 measured p99 298ms on this instance shape

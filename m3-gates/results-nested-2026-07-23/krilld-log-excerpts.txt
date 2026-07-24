@@ -1,0 +1,7 @@
+time=2026-07-24T03:41:42.724Z level=WARN msg="data disk rebuilt from object store" app=ledger stream=s0 head=0 had_disk=true cursor_lsn=0 cursor_stream=""
+time=2026-07-24T03:41:57.156Z level=WARN msg="data disk rebuilt from object store" app=ledger stream=s0 head=232 had_disk=true cursor_lsn=0 cursor_stream=""
+time=2026-07-24T03:42:10.139Z level=WARN msg="data disk rebuilt from object store" app=ledger stream=s0 head=0 had_disk=true cursor_lsn=0 cursor_stream=""
+time=2026-07-24T03:42:48.261Z level=WARN msg="data disk rebuilt from object store" app=ledger stream=s0 head=0 had_disk=true cursor_lsn=0 cursor_stream=""
+time=2026-07-24T03:43:01.246Z level=INFO msg="PITR branch" app=ledger from=s0 at_lsn=105 stream=s1
+time=2026-07-24T03:43:10.194Z level=INFO msg="PITR branch" app=ledger from=s0 at_lsn=233 stream=s2
+time=2026-07-24T03:43:23.308Z level=WARN msg="data disk rebuilt from object store" app=waketax stream=s0 head=0 had_disk=true cursor_lsn=0 cursor_stream=""

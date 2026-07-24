@@ -1,0 +1,278 @@
+{
+  "app": "ledger",
+  "stream": "s0",
+  "cur_epoch": 4294967299,
+  "head_lsn": 29,
+  "page_size": 4096,
+  "segments": [
+    {
+      "kind": "frames",
+      "epoch": 4294967297,
+      "from_lsn": 0,
+      "to_lsn": 1,
+      "key": "apps/ledger/s0/seg/0000000000000000-0000000000000001-g1.c1",
+      "time": "2026-07-24T03:42:11.480955987Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 1,
+      "to_lsn": 2,
+      "key": "apps/ledger/s0/seg/0000000000000001-0000000000000002-g1.c1.rebase",
+      "time": "2026-07-24T03:42:11.497246682Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 2,
+      "to_lsn": 3,
+      "key": "apps/ledger/s0/seg/0000000000000002-0000000000000003-g1.c1.rebase",
+      "time": "2026-07-24T03:42:11.515790585Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 3,
+      "to_lsn": 4,
+      "key": "apps/ledger/s0/seg/0000000000000003-0000000000000004-g1.c1.rebase",
+      "time": "2026-07-24T03:42:11.533385251Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 4,
+      "to_lsn": 5,
+      "key": "apps/ledger/s0/seg/0000000000000004-0000000000000005-g1.c1.rebase",
+      "time": "2026-07-24T03:42:11.549847916Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 5,
+      "to_lsn": 6,
+      "key": "apps/ledger/s0/seg/0000000000000005-0000000000000006-g1.c1.rebase",
+      "time": "2026-07-24T03:42:11.710667461Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 6,
+      "to_lsn": 7,
+      "key": "apps/ledger/s0/seg/0000000000000006-0000000000000007-g1.c1.rebase",
+      "time": "2026-07-24T03:42:11.958295906Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 7,
+      "to_lsn": 8,
+      "key": "apps/ledger/s0/seg/0000000000000007-0000000000000008-g1.c1.rebase",
+      "time": "2026-07-24T03:42:12.208215893Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 8,
+      "to_lsn": 9,
+      "key": "apps/ledger/s0/seg/0000000000000008-0000000000000009-g1.c1.rebase",
+      "time": "2026-07-24T03:42:12.458730319Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 9,
+      "to_lsn": 10,
+      "key": "apps/ledger/s0/seg/0000000000000009-0000000000000010-g1.c1.rebase",
+      "time": "2026-07-24T03:42:12.708502305Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 10,
+      "to_lsn": 11,
+      "key": "apps/ledger/s0/seg/0000000000000010-0000000000000011-g1.c1.rebase",
+      "time": "2026-07-24T03:42:12.957578874Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 11,
+      "to_lsn": 12,
+      "key": "apps/ledger/s0/seg/0000000000000011-0000000000000012-g1.c1.rebase",
+      "time": "2026-07-24T03:42:13.208216638Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 12,
+      "to_lsn": 13,
+      "key": "apps/ledger/s0/seg/0000000000000012-0000000000000013-g1.c1.rebase",
+      "time": "2026-07-24T03:42:13.457890462Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 13,
+      "to_lsn": 14,
+      "key": "apps/ledger/s0/seg/0000000000000013-0000000000000014-g1.c1.rebase",
+      "time": "2026-07-24T03:42:13.708483037Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 14,
+      "to_lsn": 15,
+      "key": "apps/ledger/s0/seg/0000000000000014-0000000000000015-g1.c1.rebase",
+      "time": "2026-07-24T03:42:13.958824706Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 15,
+      "to_lsn": 16,
+      "key": "apps/ledger/s0/seg/0000000000000015-0000000000000016-g1.c1.rebase",
+      "time": "2026-07-24T03:42:14.208539508Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 16,
+      "to_lsn": 17,
+      "key": "apps/ledger/s0/seg/0000000000000016-0000000000000017-g1.c1.rebase",
+      "time": "2026-07-24T03:42:14.458323057Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 17,
+      "to_lsn": 18,
+      "key": "apps/ledger/s0/seg/0000000000000017-0000000000000018-g1.c1.rebase",
+      "time": "2026-07-24T03:42:14.708021618Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 18,
+      "to_lsn": 19,
+      "key": "apps/ledger/s0/seg/0000000000000018-0000000000000019-g1.c1.rebase",
+      "time": "2026-07-24T03:42:14.958670655Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 19,
+      "to_lsn": 20,
+      "key": "apps/ledger/s0/seg/0000000000000019-0000000000000020-g1.c1.rebase",
+      "time": "2026-07-24T03:42:15.207844146Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 20,
+      "to_lsn": 21,
+      "key": "apps/ledger/s0/seg/0000000000000020-0000000000000021-g1.c1.rebase",
+      "time": "2026-07-24T03:42:15.457575991Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 21,
+      "to_lsn": 22,
+      "key": "apps/ledger/s0/seg/0000000000000021-0000000000000022-g1.c1.rebase",
+      "time": "2026-07-24T03:42:15.709550288Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 22,
+      "to_lsn": 23,
+      "key": "apps/ledger/s0/seg/0000000000000022-0000000000000023-g1.c1.rebase",
+      "time": "2026-07-24T03:42:15.957429172Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 23,
+      "to_lsn": 24,
+      "key": "apps/ledger/s0/seg/0000000000000023-0000000000000024-g1.c1.rebase",
+      "time": "2026-07-24T03:42:16.207595942Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 24,
+      "to_lsn": 25,
+      "key": "apps/ledger/s0/seg/0000000000000024-0000000000000025-g1.c1.rebase",
+      "time": "2026-07-24T03:42:16.458533574Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 25,
+      "to_lsn": 26,
+      "key": "apps/ledger/s0/seg/0000000000000025-0000000000000026-g1.c1.rebase",
+      "time": "2026-07-24T03:42:16.708881021Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 26,
+      "to_lsn": 27,
+      "key": "apps/ledger/s0/seg/0000000000000026-0000000000000027-g1.c1.rebase",
+      "time": "2026-07-24T03:42:16.958493267Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 27,
+      "to_lsn": 28,
+      "key": "apps/ledger/s0/seg/0000000000000027-0000000000000028-g1.c1.rebase",
+      "time": "2026-07-24T03:42:17.207814791Z"
+    },
+    {
+      "kind": "rebase",
+      "epoch": 4294967297,
+      "from_lsn": 28,
+      "to_lsn": 29,
+      "key": "apps/ledger/s0/seg/0000000000000028-0000000000000029-g1.c1.rebase",
+      "time": "2026-07-24T03:42:17.458308004Z"
+    }
+  ],
+  "checkpoints": [
+    {
+      "epoch": 4294967297,
+      "lsn": 29,
+      "key": "apps/ledger/s0/ckpt/0000000000000029-g1.c1.db",
+      "time": "2026-07-24T03:42:19.533006301Z"
+    },
+    {
+      "epoch": 4294967298,
+      "lsn": 29,
+      "key": "apps/ledger/s0/ckpt/0000000000000029-g1.c2.db",
+      "time": "2026-07-24T03:42:27.525208297Z"
+    },
+    {
+      "epoch": 4294967299,
+      "lsn": 29,
+      "key": "apps/ledger/s0/ckpt/0000000000000029-g1.c3.db",
+      "time": "2026-07-24T03:42:35.364139564Z"
+    }
+  ],
+  "seals": [
+    {
+      "epoch": 4294967297,
+      "at_lsn": 0,
+      "time": "2026-07-24T03:42:10.136847418Z"
+    },
+    {
+      "epoch": 4294967298,
+      "at_lsn": 29,
+      "time": "2026-07-24T03:42:19.588893312Z"
+    },
+    {
+      "epoch": 4294967299,
+      "at_lsn": 29,
+      "time": "2026-07-24T03:42:27.577024844Z"
+    }
+  ]
+}

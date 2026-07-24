@@ -1,0 +1,7 @@
+{
+  "app": "ledger",
+  "lsn": 105,
+  "note": "app is COLD on the new branch; next request boots it. The previous stream is untouched and restorable.",
+  "stream": "s1"
+}
+

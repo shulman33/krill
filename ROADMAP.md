@@ -168,7 +168,19 @@ has `CONFIG_IP_PNP`, so krilld's `ip=` boot arg configures eth0 before
 userspace — **images need no iproute2, arbitrary Dockerfiles deploy
 unmodified** (the generated init's `ip`-if-present path is a fallback).
 
-### M3 — the data plane (the crown jewel) — ✅ IMPLEMENTED 2026-07-23 (single session); C4 PASS locally, C1–C3 await the hardware run
+### M3 — the data plane (the crown jewel) — ✅ ACCEPTED 2026-07-23 (single session)
+
+**All four pre-registered gates PASS** (`m3-gates/RESULTS-2026-07-23-nested.md`,
+hardware ≈ $0.20): C1 durability — 200/200 acked rows byte-identical after
+SIGKILL + deletion of every app-local file, rebuilt from the object store
+via the E6 path; C2 fencing — stale append and stale registration rejected
+with the manifest byte-identical, 3 monotone takeover seals; C3 PITR —
+branch served exactly phase A, parent stream untouched, phase B recovered
+via `--from-stream s0`; C4 spec-as-oracle — 10,000 seeds clean, all three
+negative fence configs reproduce their TLC counterexamples. C-info: wake
+p50 205 ms / max 253 ms WITH the data plane + sync-ack (A1's gate was
+300 ms) — the fencing machinery is latency-noise next to the
+guest-userspace tax.
 
 Rules E1–E6 as code, built and green under `-race`:
 
@@ -204,11 +216,8 @@ Rules E1–E6 as code, built and green under `-race`:
   `/data` (SQLite contract: `/data/app.db`); **redeploy now preserves app
   data** (B2's reset assertion is historical).
 
-Gates: `m3-gates/GATES.md` was pre-registered before any code. C4 ran at
-full budget locally. **C1 (durability across total local-state loss), C2
-(live fencing via fencetool), C3 (PITR branching) are scripted and await
-the GCP nested-virt box** — same recipe as m1/m2 gates; ~$1/hr, an hour of
-work. M3 is not "ACCEPTED" until they run.
+Gates: `m3-gates/GATES.md` was pre-registered before any code; all four
+passed (see the heading above and the results file).
 
 ### M4 — the doorman (~1–2 weeks)
 
@@ -369,27 +378,23 @@ Session-level gotchas not recorded elsewhere:
 
 ## Current state / next action
 
-- **Current state:** **M1 + M2 COMPLETE; M3 IMPLEMENTED (all 2026-07-23).**
-  The data plane exists end to end: E1–E6 as code across
+- **Current state:** **M1 + M2 + M3 COMPLETE AND ACCEPTED (all
+  2026-07-23).** The data plane exists end to end and passed all four
+  pre-registered gates on hardware
+  (`m3-gates/RESULTS-2026-07-23-nested.md`): E1–E6 as code across
   `internal/{objstore,sqlitewal,ext4,dataplane,dataplane/sim}`, wired into
   krilld (data disks at `/data`, wake = mint + fenced takeover seal +
   rebuild-if-diverged, freeze = final ship + E5 checkpoint, router
   sync-ack, PITR via `krill restore`, zombie-kill on fence). Whole tree
-  green under `go test -race ./...`; linux/amd64 cross-compiles. **Gate
-  C4 PASSED at full budget locally** (10,000 seeds positive clean; all
-  three negative fence configs reproduce their TLC counterexamples —
-  PT-1, the E6 bug, PT-9). No protocol changes were needed: the spec and
-  both HTML docs are untouched (tripwire not tripped). The M2
+  green under `go test -race ./...`. No protocol changes were needed: the
+  spec and both HTML docs are untouched (tripwire not tripped). The M2
   redeploy-resets-data contract is retired: `/data` survives redeploys.
-  MCP server does not yet expose stream/restore (queued). Nothing running
-  or billing on GCP.
-- **Next action:** **run C1–C3 + C-info on the GCP nested-virt box** to
-  ACCEPT M3 (`m3-gates/README.md` has the exact order; provision per
-  `wake-bench/README.md`; build with
-  `make krilld-linux krill-linux fencetool-linux` first). Then record
-  `m3-gates/RESULTS-<date>-nested.md`, update the M3 heading to ACCEPTED,
-  and sweep GCP to zero. After that: M4 (the doorman) or the queued side
-  quests — MCP stream/restore tools, the ~200 ms guest-userspace wake-tax
-  investigation, and the blog posts (the spec-as-test-oracle sim harness
-  is now a strong fifth candidate). Push commits to origin at session end
-  (`git push`) so CI badges stay live.
+  MCP server does not yet expose stream/restore (queued). GCP swept to
+  zero billing resources (M3 hardware run ≈ $0.20).
+- **Next action:** M4 (the doorman: edge auth, share links, the
+  three-plane ACL) — or the queued side quests first: MCP stream/restore
+  tools, segment group-commit batching + GC past checkpoints (both noted
+  in the M3 results findings), the ~200 ms guest-userspace wake-tax
+  investigation, and the blog posts (three written in session history;
+  the spec-as-test-oracle sim harness is a strong fifth candidate). Push
+  commits to origin at session end (`git push`) so CI badges stay live.
