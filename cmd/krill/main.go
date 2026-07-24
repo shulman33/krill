@@ -76,11 +76,12 @@ func (c *client) restore(args []string) error {
 	fs := c.flags("restore")
 	atLSN := fs.Uint64("at-lsn", 0, "stream LSN to restore to (see `krill stream`)")
 	atTime := fs.String("at-time", "", "RFC3339 instant to restore to (host clock)")
+	fromStream := fs.String("from-stream", "", "branch source stream (default: current; name an ancestor to restore back past an earlier restore)")
 	pos := parseFlexible(fs, args)
 	if len(pos) != 1 || (*atLSN == 0 && *atTime == "") {
-		return fmt.Errorf("usage: krill restore <app> --at-lsn N | --at-time RFC3339")
+		return fmt.Errorf("usage: krill restore <app> --at-lsn N | --at-time RFC3339 [--from-stream sN]")
 	}
-	body, _ := json.Marshal(map[string]any{"at_lsn": *atLSN, "at_time": *atTime})
+	body, _ := json.Marshal(map[string]any{"at_lsn": *atLSN, "at_time": *atTime, "stream": *fromStream})
 	c.http.Timeout = 3 * time.Minute
 	resp, err := c.http.Post(c.admin+"/v1/apps/"+pos[0]+"/restore", "application/json", strings.NewReader(string(body)))
 	if err != nil {

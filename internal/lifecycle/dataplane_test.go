@@ -63,7 +63,7 @@ func (f *fakeDataPlane) Sync(ctx context.Context, name string) error {
 	return nil
 }
 
-func (f *fakeDataPlane) BranchRestore(ctx context.Context, app registry.App, atLSN uint64, atTime time.Time) (string, uint64, error) {
+func (f *fakeDataPlane) BranchRestore(ctx context.Context, app registry.App, fromStream string, atLSN uint64, atTime time.Time) (string, uint64, error) {
 	f.record("branch:" + app.Name)
 	return "s1", atLSN, nil
 }
@@ -228,7 +228,7 @@ func TestRestoreDataBranches(t *testing.T) {
 	}
 	release()
 
-	stream, lsn, err := sup.RestoreData(context.Background(), "counter", 42, time.Time{})
+	stream, lsn, err := sup.RestoreData(context.Background(), "counter", "", 42, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

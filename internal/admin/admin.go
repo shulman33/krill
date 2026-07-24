@@ -141,6 +141,9 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 	var req struct {
 		AtLSN  uint64 `json:"at_lsn"`
 		AtTime string `json:"at_time"`
+		// Stream optionally names the branch source; "" = the app's current
+		// stream. Restoring back past an earlier restore = name the ancestor.
+		Stream string `json:"stream"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad restore request: "+err.Error(), http.StatusBadRequest)
@@ -154,7 +157,7 @@ func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
 			return
 		}
 	}
-	stream, lsn, err := s.sup.RestoreData(r.Context(), name, req.AtLSN, at)
+	stream, lsn, err := s.sup.RestoreData(r.Context(), name, req.Stream, req.AtLSN, at)
 	if err != nil {
 		fail(w, statusFor(err), err)
 		return

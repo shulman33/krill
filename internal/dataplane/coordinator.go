@@ -186,9 +186,15 @@ func (c *Coordinator) Sync(ctx context.Context, name string) error {
 
 // BranchRestore is PITR (D4): fork a new stream at the requested point,
 // rebuild the data disk to it, and repoint the app. The parent stream is
-// never modified. The supervisor guarantees the app is quiesced.
-func (c *Coordinator) BranchRestore(ctx context.Context, app registry.App, atLSN uint64, atTime time.Time) (string, uint64, error) {
-	name, from := app.Name, streamOf(app)
+// never modified. fromStream selects the branch source ("" = the app's
+// current stream) — naming an ancestor explicitly is how you restore BACK
+// past an earlier restore (PT-8: every branch remains reachable forever).
+// The supervisor guarantees the app is quiesced.
+func (c *Coordinator) BranchRestore(ctx context.Context, app registry.App, fromStream string, atLSN uint64, atTime time.Time) (string, uint64, error) {
+	name, from := app.Name, fromStream
+	if from == "" {
+		from = streamOf(app)
+	}
 	if !atTime.IsZero() {
 		lsn, err := c.GW.ResolveTime(ctx, name, from, atTime)
 		if err != nil {

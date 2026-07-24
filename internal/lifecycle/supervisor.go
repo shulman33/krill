@@ -104,8 +104,9 @@ type DataPlane interface {
 	// Sync blocks until everything committed locally is durable (D1).
 	Sync(ctx context.Context, name string) error
 	// BranchRestore forks the stream at a point in time (PITR, D4); the
-	// caller guarantees the app is quiesced.
-	BranchRestore(ctx context.Context, app registry.App, atLSN uint64, atTime time.Time) (stream string, lsn uint64, err error)
+	// caller guarantees the app is quiesced. fromStream "" = current;
+	// naming an ancestor restores back past an earlier restore (PT-8).
+	BranchRestore(ctx context.Context, app registry.App, fromStream string, atLSN uint64, atTime time.Time) (stream string, lsn uint64, err error)
 	// StreamStatus returns the app's current stream manifest.
 	StreamStatus(ctx context.Context, name, stream string) (*dataplane.Manifest, error)
 	// PurgeApp removes the app's object-store data (deletion is total).
@@ -739,8 +740,9 @@ func (s *Supervisor) StreamStatus(ctx context.Context, name string) (*dataplane.
 // RestoreData is PITR: quiesce the app, branch its stream at the requested
 // point (atLSN, or atTime if non-zero), rebuild the data disk to it, and
 // leave the app COLD on the new branch. The old stream is never modified —
-// restoring "back to before the restore" remains possible forever (D4).
-func (s *Supervisor) RestoreData(ctx context.Context, name string, atLSN uint64, atTime time.Time) (string, uint64, error) {
+// restoring "back to before the restore" remains possible forever (D4):
+// pass fromStream to branch from an ancestor instead of the current stream.
+func (s *Supervisor) RestoreData(ctx context.Context, name, fromStream string, atLSN uint64, atTime time.Time) (string, uint64, error) {
 	if s.dp == nil {
 		return "", 0, errors.New("data plane disabled")
 	}
@@ -761,7 +763,7 @@ func (s *Supervisor) RestoreData(ctx context.Context, name string, atLSN uint64,
 	if err := s.reg.SetSnapshotValid(name, false); err != nil {
 		return "", 0, err
 	}
-	stream, lsn, err := s.dp.BranchRestore(ctx, meta, atLSN, atTime)
+	stream, lsn, err := s.dp.BranchRestore(ctx, meta, fromStream, atLSN, atTime)
 	if err != nil {
 		return "", 0, fmt.Errorf("restore %s: %w", name, err)
 	}

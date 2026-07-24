@@ -213,7 +213,7 @@ func (d *syncDP) Sync(ctx context.Context, name string) error {
 	d.syncs++
 	return d.fail
 }
-func (d *syncDP) BranchRestore(context.Context, registry.App, uint64, time.Time) (string, uint64, error) {
+func (d *syncDP) BranchRestore(context.Context, registry.App, string, uint64, time.Time) (string, uint64, error) {
 	return "", 0, nil
 }
 func (d *syncDP) StreamStatus(context.Context, string, string) (*dataplane.Manifest, error) {
