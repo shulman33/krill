@@ -15,8 +15,12 @@ type VMConfig struct {
 	KernelPath string
 	BootArgs   string
 	RootfsPath string // this exact path gets baked into any snapshot taken later
-	TapDev     string
-	GuestMAC   string
+	// DataPath, when non-empty, attaches a second virtio drive (/dev/vdb in
+	// the guest): the app's durable data disk, tailed from the host by the
+	// M3 data plane. Also baked into snapshots.
+	DataPath string
+	TapDev   string
+	GuestMAC string
 }
 
 // Machine is one firecracker process plus its API socket.
@@ -84,12 +88,25 @@ func (m *Machine) Configure(ctx context.Context, cfg VMConfig) error {
 		{"/drives/rootfs", map[string]any{
 			"drive_id": "rootfs", "path_on_host": cfg.RootfsPath,
 			"is_root_device": true, "is_read_only": false}},
+	}
+	if cfg.DataPath != "" {
+		steps = append(steps, struct {
+			path string
+			body any
+		}{"/drives/data", map[string]any{
+			"drive_id": "data", "path_on_host": cfg.DataPath,
+			"is_root_device": false, "is_read_only": false}})
+	}
+	steps = append(steps, []struct {
+		path string
+		body any
+	}{
 		{"/network-interfaces/eth0", map[string]any{
 			"iface_id": "eth0", "guest_mac": cfg.GuestMAC, "host_dev_name": cfg.TapDev}},
 		// The balloon must exist at boot to be inflatable at freeze time.
 		{"/balloon", map[string]any{
 			"amount_mib": 0, "deflate_on_oom": true, "stats_polling_interval_s": 1}},
-	}
+	}...)
 	for _, s := range steps {
 		if err := m.client.put(ctx, s.path, s.body); err != nil {
 			return err

@@ -21,6 +21,7 @@ type fakeRun struct {
 	config     string // docker image inspect output
 	buildFails bool
 	withIP     bool
+	noMount    bool
 	withShell  bool
 }
 
@@ -49,6 +50,9 @@ func (f *fakeRun) run(_ context.Context, name string, args ...string) ([]byte, e
 		}
 		if f.withIP {
 			os.WriteFile(filepath.Join(dst, "sbin/ip"), []byte{}, 0o755)
+		}
+		if !f.noMount {
+			os.WriteFile(filepath.Join(dst, "bin/mount"), []byte{}, 0o755)
 		}
 		os.WriteFile(filepath.Join(dst, "app.py"), bytes.Repeat([]byte("x"), 4096), 0o644)
 		return nil, nil
@@ -133,6 +137,19 @@ func TestBuildWarnsWithoutIPTool(t *testing.T) {
 	defer res.Cleanup()
 	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "ip") {
 		t.Fatalf("want iproute2 warning, got %v", res.Warnings)
+	}
+}
+
+func TestBuildWarnsWithoutMountTool(t *testing.T) {
+	f := &fakeRun{config: goodConfig, withShell: true, withIP: true, noMount: true}
+	b := newTestBuilder(t, f)
+	res, err := b.Build(context.Background(), "x", "/ctx", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Cleanup()
+	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "mount") {
+		t.Fatalf("want mount warning, got %v", res.Warnings)
 	}
 }
 

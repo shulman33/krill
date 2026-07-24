@@ -8,6 +8,8 @@
 //	krill wake <app>
 //	krill freeze <app>
 //	krill delete <app>
+//	krill stream <app>   data-plane stream: head LSN, epoch, segments, branches
+//	krill restore <app> --at-lsn N | --at-time RFC3339   PITR (branching)
 //
 // The admin API address comes from --admin or KRILL_ADMIN (default
 // http://127.0.0.1:9091 — run on the host, or bring an SSH tunnel).
@@ -39,7 +41,7 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: krill <deploy|apps|status|logs|wake|freeze|delete> [args]\n(see the package comment in cmd/krill)")
+		return fmt.Errorf("usage: krill <deploy|apps|status|logs|wake|freeze|delete|stream|restore> [args]\n(see the package comment in cmd/krill)")
 	}
 	c := &client{admin: envOr("KRILL_ADMIN", "http://127.0.0.1:9091")}
 	cmd, rest := args[0], args[1:]
@@ -58,9 +60,39 @@ func run(args []string) error {
 		return c.delete(rest)
 	case "logs":
 		return c.logs(rest)
+	case "stream":
+		return c.appJSON(rest, "stream", "/stream")
+	case "restore":
+		return c.restore(rest)
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
+}
+
+// restore is PITR: branch the app's data stream at a past point and rebuild
+// its data disk there. The old stream is never modified — `krill stream`
+// shows every branch, and restoring back is always possible.
+func (c *client) restore(args []string) error {
+	fs := c.flags("restore")
+	atLSN := fs.Uint64("at-lsn", 0, "stream LSN to restore to (see `krill stream`)")
+	atTime := fs.String("at-time", "", "RFC3339 instant to restore to (host clock)")
+	pos := parseFlexible(fs, args)
+	if len(pos) != 1 || (*atLSN == 0 && *atTime == "") {
+		return fmt.Errorf("usage: krill restore <app> --at-lsn N | --at-time RFC3339")
+	}
+	body, _ := json.Marshal(map[string]any{"at_lsn": *atLSN, "at_time": *atTime})
+	c.http.Timeout = 3 * time.Minute
+	resp, err := c.http.Post(c.admin+"/v1/apps/"+pos[0]+"/restore", "application/json", strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("restore: %s: %s", resp.Status, strings.TrimSpace(string(raw)))
+	}
+	fmt.Println(string(raw))
+	return nil
 }
 
 type client struct {

@@ -41,6 +41,10 @@ type App struct {
 	BootArgs   string
 	// State is the last persisted lifecycle state (see package lifecycle).
 	State string
+	// StreamID is the app's current data-plane stream. "s0" at creation;
+	// PITR restores branch to s1, s2, ... — the old stream is never
+	// touched (D4: branching, not truncation).
+	StreamID string
 	// SnapshotValid is true only while the snapshot on disk is exactly
 	// paired with the app's active disk image. Anything that can mutate the
 	// disk outside a restore (cold boot, crash while running) must clear it
@@ -66,7 +70,44 @@ func Open(path string) (*Registry, error) {
 		db.Close()
 		return nil, fmt.Errorf("registry schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("registry migration: %w", err)
+	}
 	return &Registry{db: db}, nil
+}
+
+// migrate applies idempotent, additive schema changes (M2 databases predate
+// the stream_id column).
+func migrate(db *sql.DB) error {
+	var hasStream bool
+	rows, err := db.Query(`PRAGMA table_info(apps)`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "stream_id" {
+			hasStream = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasStream {
+		if _, err := db.Exec(`ALTER TABLE apps ADD COLUMN stream_id TEXT NOT NULL DEFAULT 's0'`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const schema = `
@@ -81,8 +122,15 @@ CREATE TABLE IF NOT EXISTS apps (
   boot_args      TEXT NOT NULL DEFAULT '',
   state          TEXT NOT NULL,
   snapshot_valid INTEGER NOT NULL DEFAULT 0,
+  stream_id      TEXT NOT NULL DEFAULT 's0',
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL
+);
+-- The E1 control plane: one strictly monotone epoch counter per app,
+-- minted in the registry's linearizable store (this SQLite database).
+CREATE TABLE IF NOT EXISTS epochs (
+  app     TEXT PRIMARY KEY,
+  counter INTEGER NOT NULL
 );`
 
 func (r *Registry) Close() error { return r.db.Close() }
@@ -207,7 +255,31 @@ func (r *Registry) Delete(name string) error {
 	if n == 0 {
 		return ErrNotFound
 	}
+	// The epoch counter dies with the app. A re-created app under the same
+	// name starts at counter 1 — which is exactly why Delete must also
+	// purge the app's object-store prefix (the supervisor does).
+	_, _ = r.db.Exec(`DELETE FROM epochs WHERE app = ?`, name)
 	return nil
+}
+
+// MintEpoch is E1: a strictly monotone counter per app, incremented by a
+// transaction in the registry's linearizable store on every wake (= lease
+// acquisition; on a single host the daemon is the only lease holder).
+func (r *Registry) MintEpoch(name string) (uint32, error) {
+	var c int64
+	err := r.db.QueryRow(`
+		INSERT INTO epochs (app, counter) VALUES (?, 1)
+		ON CONFLICT(app) DO UPDATE SET counter = counter + 1
+		RETURNING counter`, name).Scan(&c)
+	if err != nil {
+		return 0, fmt.Errorf("minting epoch for %s: %w", name, err)
+	}
+	return uint32(c), nil
+}
+
+// SetStreamID repoints the app at a new data-plane stream (PITR restore).
+func (r *Registry) SetStreamID(name, stream string) error {
+	return r.update(name, `stream_id = ?`, stream)
 }
 
 func (r *Registry) update(name, setClause string, val any) error {
@@ -226,7 +298,7 @@ func (r *Registry) update(name, setClause string, val any) error {
 
 const selectCols = `
 	SELECT id, name, vcpus, mem_mib, guest_port, subnet_idx, kernel_path,
-	       boot_args, state, snapshot_valid, created_at, updated_at FROM apps`
+	       boot_args, state, snapshot_valid, stream_id, created_at, updated_at FROM apps`
 
 type scanner interface{ Scan(...any) error }
 
@@ -236,7 +308,7 @@ func scanApp(s scanner) (App, error) {
 	var created, updated string
 	err := s.Scan(&a.ID, &a.Name, &a.VCPUs, &a.MemMiB, &a.GuestPort,
 		&a.SubnetIdx, &a.KernelPath, &a.BootArgs, &a.State, &snap,
-		&created, &updated)
+		&a.StreamID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}

@@ -36,6 +36,18 @@ func (m *Manager) AppDir(name string) string {
 }
 func (m *Manager) GoldenPath(name string) string { return filepath.Join(m.AppDir(name), "golden.ext4") }
 func (m *Manager) DiskPath(name string) string   { return filepath.Join(m.AppDir(name), "disk.ext4") }
+
+// DataDiskPath is the app's durable data disk (guest /dev/vdb, mounted at
+// /data): the ONE file a redeploy never touches — app data now outlives app
+// code (the M3 contract, replacing M2's redeploy-resets-data).
+func (m *Manager) DataDiskPath(name string) string {
+	return filepath.Join(m.AppDir(name), "data.ext4")
+}
+
+// ShipCursorPath is the data-plane shipper's local progress cache.
+func (m *Manager) ShipCursorPath(name string) string {
+	return filepath.Join(m.AppDir(name), "ship.json")
+}
 func (m *Manager) SnapDir(name string) string    { return filepath.Join(m.AppDir(name), "snap") }
 func (m *Manager) VMStatePath(name string) string {
 	return filepath.Join(m.SnapDir(name), "vmstate")
@@ -120,6 +132,61 @@ func (m *Manager) PunchHoles(name string) {
 	if runtime.GOOS == "linux" {
 		_ = exec.Command("fallocate", "-d", m.MemPath(name)).Run()
 	}
+}
+
+// BuildDataDisk creates an ext4 data-disk image containing files (paths
+// relative to the fs root), replacing any existing one atomically. Used at
+// install (empty), and by the data plane when reconstructing local state
+// from the object store (restore/PITR — the caller must have invalidated
+// any FC snapshot first, same rule as every other disk mutation).
+//
+// mkfs.ext4 -d packs the tree with no loop mounts; -J size=4 keeps the
+// jbd2 journal small because the host tailer re-reads it on precise scans;
+// the root dir is 1777 so non-root guest apps can create their database.
+func (m *Manager) BuildDataDisk(name string, files map[string][]byte, sizeMB int) error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("data disks require linux (mkfs.ext4)")
+	}
+	if sizeMB <= 0 {
+		sizeMB = 256
+	}
+	stage, err := os.MkdirTemp(m.AppDir(name), "datastage-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+	if err := os.Chmod(stage, 0o1777); err != nil {
+		return err
+	}
+	for rel, content := range files {
+		p := filepath.Join(stage, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, content, 0o666); err != nil {
+			return err
+		}
+	}
+	tmp := m.DataDiskPath(name) + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if err := f.Truncate(int64(sizeMB) << 20); err != nil {
+		f.Close()
+		return err
+	}
+	f.Close()
+	if out, err := exec.Command("mkfs.ext4", "-q", "-F", "-b", "4096", "-J", "size=4", "-d", stage, tmp).CombinedOutput(); err != nil {
+		return fmt.Errorf("mkfs data disk: %w: %s", err, out)
+	}
+	return os.Rename(tmp, m.DataDiskPath(name))
+}
+
+// HasDataDisk reports whether the app's data disk exists.
+func (m *Manager) HasDataDisk(name string) bool {
+	_, err := os.Stat(m.DataDiskPath(name))
+	return err == nil
 }
 
 // Purge removes everything the app owns on disk.

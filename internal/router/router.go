@@ -39,6 +39,12 @@ const connectGrace = 3 * time.Second
 type Router struct {
 	sup *lifecycle.Supervisor
 	log *slog.Logger
+	// SyncAck is D1 as a proxy behavior: before a response is released to
+	// the client, the app's committed writes must be durable at the object
+	// store. The hold happens in ModifyResponse — after the guest answered,
+	// before one byte reaches the client — so an ack can never outrun its
+	// durability. Read-only requests cost one WAL scan and no store I/O.
+	SyncAck bool
 }
 
 func New(sup *lifecycle.Supervisor, log *slog.Logger) *Router {
@@ -106,6 +112,14 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rt.log.Error("proxy", "app", name, "err", err)
 			http.Error(w, "krill: app did not answer: "+err.Error(), http.StatusBadGateway)
 		},
+	}
+	if rt.SyncAck {
+		proxy.ModifyResponse = func(*http.Response) error {
+			if err := rt.sup.SyncData(r.Context(), name); err != nil {
+				return fmt.Errorf("write not durable: %w", err)
+			}
+			return nil
+		}
 	}
 	proxy.ServeHTTP(w, r)
 

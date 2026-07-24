@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shulman33/krill/internal/dataplane"
 	"github.com/shulman33/krill/internal/lifecycle"
 	"github.com/shulman33/krill/internal/registry"
 )
@@ -192,5 +193,76 @@ func TestConcurrentRequestsShareOneWake(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Fatal(err)
+	}
+}
+
+// syncDP implements just enough of lifecycle.DataPlane to count and fail
+// Sync calls — the router's D1 hold.
+type syncDP struct {
+	mu    sync.Mutex
+	syncs int
+	fail  error
+}
+
+func (d *syncDP) PrepareWake(context.Context, registry.App) (bool, error) { return false, nil }
+func (d *syncDP) StartShipping(registry.App, func(error)) error           { return nil }
+func (d *syncDP) StopShipping(context.Context, registry.App, bool) error  { return nil }
+func (d *syncDP) Sync(ctx context.Context, name string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.syncs++
+	return d.fail
+}
+func (d *syncDP) BranchRestore(context.Context, registry.App, uint64, time.Time) (string, uint64, error) {
+	return "", 0, nil
+}
+func (d *syncDP) StreamStatus(context.Context, string, string) (*dataplane.Manifest, error) {
+	return nil, nil
+}
+func (d *syncDP) PurgeApp(context.Context, string) error { return nil }
+
+// TestSyncAckHoldsResponses: with SyncAck on, every proxied response passes
+// through the durability hold; a failing hold means the client gets a 502,
+// never an unacknowledged-durability 200.
+func TestSyncAckHoldsResponses(t *testing.T) {
+	reg, err := registry.Open(filepath.Join(t.TempDir(), "krill.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reg.Close() })
+	sup := lifecycle.New(reg, &echoBackend{addrs: map[string]string{}, snaps: map[string]bool{}},
+		lifecycle.Config{WakeTimeout: 5 * time.Second, FreezeTimeout: 5 * time.Second, IdleTimeout: time.Hour},
+		slog.Default())
+	if err := sup.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	dp := &syncDP{}
+	sup.SetDataPlane(dp)
+	rt := New(sup, slog.Default())
+	rt.SyncAck = true
+	srv := httptest.NewServer(rt)
+	t.Cleanup(srv.Close)
+
+	if _, err := sup.Register(registry.App{Name: "echo", VCPUs: 1, MemMiB: 64, GuestPort: 1}, "g"); err != nil {
+		t.Fatal(err)
+	}
+	code, _ := doReq(t, srv, "GET", "echo.localhost", "/x", "")
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200", code)
+	}
+	dp.mu.Lock()
+	n := dp.syncs
+	dp.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("sync calls = %d, want 1 (one hold per response)", n)
+	}
+
+	// A failing hold surfaces as a gateway error, not a false ack.
+	dp.mu.Lock()
+	dp.fail = errors.New("gateway unreachable")
+	dp.mu.Unlock()
+	code, body := doReq(t, srv, "POST", "echo.localhost", "/x", "data")
+	if code != http.StatusBadGateway {
+		t.Fatalf("status %d (%q), want 502 when durability cannot be confirmed", code, body)
 	}
 }

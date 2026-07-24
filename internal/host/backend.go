@@ -53,7 +53,20 @@ func (b *Backend) Install(app registry.App, goldenSrc string) error {
 	if err := b.fs.Register(app.Name, goldenSrc); err != nil {
 		return err
 	}
+	if err := b.ensureDataDisk(app); err != nil {
+		return err
+	}
 	return b.net.EnsureTap(b.appNet(app))
+}
+
+// ensureDataDisk creates the app's (empty) durable data disk if the data
+// plane wants one and it doesn't exist — including for apps that predate
+// M3, on their first Prepare after upgrade.
+func (b *Backend) ensureDataDisk(app registry.App) error {
+	if !b.cfg.DataPlane || b.fs.HasDataDisk(app.Name) {
+		return nil
+	}
+	return b.fs.BuildDataDisk(app.Name, nil, b.cfg.DataDiskMB)
 }
 
 // Replace swaps in a new golden and resets disk + snapshot files. The
@@ -75,6 +88,9 @@ func (b *Backend) SerialLogPath(app registry.App) string {
 
 func (b *Backend) Prepare(app registry.App) error {
 	if err := b.fs.EnsureDirs(app.Name); err != nil {
+		return err
+	}
+	if err := b.ensureDataDisk(app); err != nil {
 		return err
 	}
 	return b.net.EnsureTap(b.appNet(app))
@@ -129,7 +145,7 @@ func (b *Backend) ColdBoot(ctx context.Context, app registry.App) (lifecycle.Ins
 	if err != nil {
 		return nil, err
 	}
-	err = m.Configure(ctx, firecracker.VMConfig{
+	vmc := firecracker.VMConfig{
 		VCPUs:      app.VCPUs,
 		MemMiB:     app.MemMiB,
 		KernelPath: b.kernel(app),
@@ -137,7 +153,11 @@ func (b *Backend) ColdBoot(ctx context.Context, app registry.App) (lifecycle.Ins
 		RootfsPath: b.fs.DiskPath(app.Name),
 		TapDev:     n.TapName,
 		GuestMAC:   n.GuestMAC,
-	})
+	}
+	if b.cfg.DataPlane && b.fs.HasDataDisk(app.Name) {
+		vmc.DataPath = b.fs.DataDiskPath(app.Name)
+	}
+	err = m.Configure(ctx, vmc)
 	if err == nil {
 		err = m.Start(ctx)
 	}

@@ -114,9 +114,55 @@ func (s *Server) appRoute(w http.ResponseWriter, r *http.Request, rest string) {
 		s.deploy(w, r, name)
 	case action == "logs" && r.Method == http.MethodGet:
 		s.logs(w, r, name)
+	case action == "stream" && r.Method == http.MethodGet:
+		s.stream(w, r, name)
+	case action == "restore" && r.Method == http.MethodPost:
+		s.restore(w, r, name)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// stream exposes the app's data-plane manifest: head LSN, current epoch,
+// segments, checkpoints, seals, branches.
+func (s *Server) stream(w http.ResponseWriter, r *http.Request, name string) {
+	m, err := s.sup.StreamStatus(r.Context(), name)
+	if err != nil {
+		fail(w, statusFor(err), err)
+		return
+	}
+	reply(w, http.StatusOK, m)
+}
+
+// restore is PITR: {"at_lsn": N} or {"at_time": "RFC3339"} → branch the
+// stream at that point and rebuild the app's data disk to it. The old
+// stream stays intact forever (D4) — a follow-up restore can return to it.
+func (s *Server) restore(w http.ResponseWriter, r *http.Request, name string) {
+	var req struct {
+		AtLSN  uint64 `json:"at_lsn"`
+		AtTime string `json:"at_time"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad restore request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	var at time.Time
+	if req.AtTime != "" {
+		var err error
+		if at, err = time.Parse(time.RFC3339, req.AtTime); err != nil {
+			http.Error(w, "at_time must be RFC3339: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	stream, lsn, err := s.sup.RestoreData(r.Context(), name, req.AtLSN, at)
+	if err != nil {
+		fail(w, statusFor(err), err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{
+		"app": name, "stream": stream, "lsn": lsn,
+		"note": "app is COLD on the new branch; next request boots it. The previous stream is untouched and restorable.",
+	})
 }
 
 // deployResp is the deploy tool's whole feedback loop in one payload: where

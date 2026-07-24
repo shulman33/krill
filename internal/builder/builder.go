@@ -168,6 +168,10 @@ func (b *Builder) Build(ctx context.Context, name, contextDir string, sizeMB int
 		res.Warnings = append(res.Warnings,
 			"image has no `ip` binary (iproute2); guest networking will rely on kernel-level ip= autoconfig")
 	}
+	if !hasMountTool(staging) {
+		res.Warnings = append(res.Warnings,
+			"image has no `mount` binary; /data (the durable data disk) cannot be mounted — app data will not survive redeploys")
+	}
 
 	initPath := filepath.Join(staging, "krill-init.sh")
 	if err := os.WriteFile(initPath, []byte(InitScript(name, cfg)), 0o755); err != nil {
@@ -216,6 +220,13 @@ if command -v ip >/dev/null 2>&1 && [ -n "$IP" ]; then
   ip route add default via "$GW" 2>/dev/null
 fi
 # (no ip binary: krilld also passes kernel ip= autoconfig, which already ran)
+# The M3 data contract: /dev/vdb is the app's durable data disk. Anything
+# the app wants to outlive redeploys — above all its SQLite database at
+# /data/app.db — lives here. No vdb attached (data plane off) is fine.
+if [ -b /dev/vdb ]; then
+  mkdir -p /data
+  mount /dev/vdb /data 2>/dev/null || echo "krill-init: mounting /data failed" >&2
+fi
 export HOME="${HOME:-/root}"
 `)
 	for _, e := range cfg.Env {
@@ -291,6 +302,15 @@ func hasShell(staging string) bool {
 
 func hasIPTool(staging string) bool {
 	for _, p := range []string{"sbin/ip", "usr/sbin/ip", "bin/ip", "usr/bin/ip"} {
+		if _, err := os.Lstat(filepath.Join(staging, p)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func hasMountTool(staging string) bool {
+	for _, p := range []string{"bin/mount", "usr/bin/mount", "sbin/mount", "usr/sbin/mount"} {
 		if _, err := os.Lstat(filepath.Join(staging, p)); err == nil {
 			return true
 		}

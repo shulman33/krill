@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shulman33/krill/internal/dataplane"
 	"github.com/shulman33/krill/internal/registry"
 )
 
@@ -85,6 +86,32 @@ type Config struct {
 	JanitorInterval time.Duration
 }
 
+// DataPlane is the M3 hook set: the fencing data plane's lifecycle
+// integration points. Nil = data plane disabled (M1/M2 behavior).
+// Implemented by *dataplane.Coordinator.
+type DataPlane interface {
+	// PrepareWake runs BEFORE the VMM starts (E6 ordering): mint epoch,
+	// fenced takeover seal, reconcile local data disk with the stream.
+	// rebuilt=true means the disk was reconstructed and any FC snapshot is
+	// now unusable — the supervisor demotes the wake to a cold boot.
+	PrepareWake(ctx context.Context, app registry.App) (rebuilt bool, err error)
+	// StartShipping begins the WAL tail once the instance serves; kill is
+	// called if the gateway fences this epoch (the instance is a zombie).
+	StartShipping(app registry.App, kill func(error)) error
+	// StopShipping halts the tail; finalCheckpoint (freeze path, guest
+	// paused) also ships the remaining delta and registers a checkpoint.
+	StopShipping(ctx context.Context, app registry.App, finalCheckpoint bool) error
+	// Sync blocks until everything committed locally is durable (D1).
+	Sync(ctx context.Context, name string) error
+	// BranchRestore forks the stream at a point in time (PITR, D4); the
+	// caller guarantees the app is quiesced.
+	BranchRestore(ctx context.Context, app registry.App, atLSN uint64, atTime time.Time) (stream string, lsn uint64, err error)
+	// StreamStatus returns the app's current stream manifest.
+	StreamStatus(ctx context.Context, name, stream string) (*dataplane.Manifest, error)
+	// PurgeApp removes the app's object-store data (deletion is total).
+	PurgeApp(ctx context.Context, name string) error
+}
+
 func (c Config) janitorTick() time.Duration {
 	if c.JanitorInterval > 0 {
 		return c.JanitorInterval
@@ -97,10 +124,14 @@ type Supervisor struct {
 	be  Backend
 	cfg Config
 	log *slog.Logger
+	dp  DataPlane // nil = data plane disabled
 
 	mu   sync.Mutex
 	apps map[string]*appState
 }
+
+// SetDataPlane attaches the M3 data plane. Call before Reconcile.
+func (s *Supervisor) SetDataPlane(dp DataPlane) { s.dp = dp }
 
 type appState struct {
 	name string
@@ -271,17 +302,37 @@ func (s *Supervisor) performWake(a *appState, meta registry.App, from State) {
 
 	var inst Instance
 	var err error
-	if from == StateFrozen {
-		inst, err = s.be.Restore(ctx, meta)
-	} else {
-		// Booting mutates the disk. Any leftover snapshot (e.g. from a crash
-		// demotion) must be invalidated BEFORE the guest can write.
-		if err = s.reg.SetSnapshotValid(meta.Name, false); err == nil {
-			inst, err = s.be.ColdBoot(ctx, meta)
+	if s.dp != nil {
+		// E6 ordering: epoch mint + fenced takeover seal + data-disk
+		// reconciliation happen before one guest instruction runs. A
+		// rebuilt data disk no longer matches any memory snapshot.
+		var rebuilt bool
+		rebuilt, err = s.dp.PrepareWake(ctx, meta)
+		if err == nil && rebuilt {
+			_ = s.reg.SetSnapshotValid(meta.Name, false)
+			if from == StateFrozen {
+				s.log.Warn("wake demoted to cold boot: data disk rebuilt", "app", meta.Name)
+				from = StateCold
+			}
+		}
+	}
+	if err == nil {
+		if from == StateFrozen {
+			inst, err = s.be.Restore(ctx, meta)
+		} else {
+			// Booting mutates the disk. Any leftover snapshot (e.g. from a
+			// crash demotion) must be invalidated BEFORE the guest can write.
+			if err = s.reg.SetSnapshotValid(meta.Name, false); err == nil {
+				inst, err = s.be.ColdBoot(ctx, meta)
+			}
 		}
 	}
 	if err == nil {
 		err = probeReady(ctx, s.be.GuestAddr(meta))
+	}
+	if err == nil && s.dp != nil {
+		name := meta.Name
+		err = s.dp.StartShipping(meta, func(fenceErr error) { s.killZombie(name, fenceErr) })
 	}
 
 	a.mu.Lock()
@@ -309,6 +360,36 @@ func (s *Supervisor) performWake(a *appState, meta registry.App, from State) {
 	}
 	close(a.wakeDone)
 	a.wakeDone = nil
+}
+
+// killZombie destroys a fenced instance: the gateway rejected its epoch, so
+// every further externally visible effect from it would be a lie (E3's
+// rejection clause; PT-1's resolution). The app demotes to COLD — its next
+// wake mints a fresh epoch and reconciles from the object store.
+func (s *Supervisor) killZombie(name string, fenceErr error) {
+	a, meta, err := s.app(name)
+	if err != nil {
+		return
+	}
+	a.mu.Lock()
+	if a.state != StateActive {
+		a.mu.Unlock()
+		return
+	}
+	inst := a.inst
+	a.inst = nil
+	a.state = StateCold
+	a.mu.Unlock()
+
+	if inst != nil {
+		inst.Kill()
+	}
+	if s.dp != nil {
+		_ = s.dp.StopShipping(context.Background(), meta, false)
+	}
+	_ = s.reg.SetSnapshotValid(name, false)
+	_ = s.reg.SetState(name, string(StateCold))
+	s.log.Error("killed fenced zombie instance", "app", name, "err", fenceErr)
 }
 
 // Freeze snapshots an ACTIVE, idle app and kills its VMM. Returns ErrBusy if
@@ -342,6 +423,17 @@ func (s *Supervisor) Freeze(name string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.FreezeTimeout)
 	err = s.be.Snapshot(ctx, meta, inst)
+	if s.dp != nil {
+		// The guest is paused (or dead): its last fsync is on the data
+		// disk. Ship the remaining delta and register the checkpoint (E5)
+		// while the pause guarantees a stable read. Failure does NOT fail
+		// the freeze: the cursor lags with the stream, and the next wake's
+		// reconcile ships the difference or rebuilds — either is safe.
+		if dpErr := s.dp.StopShipping(ctx, meta, err == nil); dpErr != nil {
+			s.log.Error("freeze-time ship/checkpoint failed (wake-time reconcile will cover)",
+				"app", name, "err", dpErr)
+		}
+	}
 	cancel()
 	inst.Kill() // unconditionally: freeing the RAM is the point
 
@@ -470,23 +562,17 @@ func (s *Supervisor) Deploy(ctx context.Context, spec registry.App, goldenSrc st
 	return meta, false, err
 }
 
-// redeploy claims the app with the DEPLOYING guard state (requests arriving
-// meanwhile wait, then cold-boot the new code), kills any running instance,
-// and replaces golden + disk. In-flight requests lose to a deploy: this is
-// an explicit operator action, and small-software requests are small.
-func (s *Supervisor) redeploy(ctx context.Context, spec registry.App, goldenSrc string) (registry.App, error) {
-	a, _, err := s.app(spec.Name)
-	if err != nil {
-		return registry.App{}, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, s.cfg.FreezeTimeout+s.cfg.WakeTimeout)
-	defer cancel()
-
+// claimQuiesce parks the app in the DEPLOYING guard state (requests
+// arriving meanwhile wait, then cold-boot afterwards), killing any running
+// instance and stopping its shipper. The returned finish func releases the
+// app to COLD. In-flight requests lose to a claim: deploys and restores
+// are explicit operator actions, and small-software requests are small.
+func (s *Supervisor) claimQuiesce(ctx context.Context, a *appState, meta registry.App) (func(), error) {
 	for {
 		a.mu.Lock()
 		if a.gone {
 			a.mu.Unlock()
-			return registry.App{}, registry.ErrNotFound
+			return nil, registry.ErrNotFound
 		}
 		var ch chan struct{}
 		switch a.state {
@@ -502,7 +588,7 @@ func (s *Supervisor) redeploy(ctx context.Context, spec registry.App, goldenSrc 
 		select {
 		case <-ch:
 		case <-ctx.Done():
-			return registry.App{}, fmt.Errorf("deploy %s: app busy: %w", spec.Name, ctx.Err())
+			return nil, fmt.Errorf("app busy: %w", ctx.Err())
 		}
 	}
 	if a.inst != nil {
@@ -513,18 +599,39 @@ func (s *Supervisor) redeploy(ctx context.Context, spec registry.App, goldenSrc 
 	a.freezeDone = make(chan struct{})
 	a.mu.Unlock()
 
-	finish := func() {
+	if s.dp != nil {
+		_ = s.dp.StopShipping(context.Background(), meta, false)
+	}
+	_ = s.reg.SetState(meta.Name, string(StateDeploying))
+	return func() {
 		a.mu.Lock()
 		a.state = StateCold
 		close(a.freezeDone)
 		a.freezeDone = nil
 		a.mu.Unlock()
-		_ = s.reg.SetState(spec.Name, string(StateCold))
+		_ = s.reg.SetState(meta.Name, string(StateCold))
+	}, nil
+}
+
+// redeploy claims the app and replaces golden + rootfs disk. The data disk
+// is deliberately NOT touched: as of M3, app data outlives app code (the
+// M2 redeploy-resets-data contract is retired — durable data now belongs
+// to the data plane).
+func (s *Supervisor) redeploy(ctx context.Context, spec registry.App, goldenSrc string) (registry.App, error) {
+	a, oldMeta, err := s.app(spec.Name)
+	if err != nil {
+		return registry.App{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.FreezeTimeout+s.cfg.WakeTimeout)
+	defer cancel()
+
+	finish, err := s.claimQuiesce(ctx, a, oldMeta)
+	if err != nil {
+		return registry.App{}, fmt.Errorf("deploy %s: %w", spec.Name, err)
 	}
 
 	// Ordering, same rule as everywhere: the pairing bit goes false before
 	// anything can touch golden, disk, or the snapshot files.
-	_ = s.reg.SetState(spec.Name, string(StateDeploying))
 	if err := s.reg.SetSnapshotValid(spec.Name, false); err != nil {
 		finish()
 		return registry.App{}, err
@@ -581,17 +688,85 @@ func (s *Supervisor) Delete(name string) error {
 	a.gone = true
 	a.mu.Unlock()
 
+	if s.dp != nil {
+		_ = s.dp.StopShipping(context.Background(), meta, false)
+	}
 	if err := s.reg.Delete(name); err != nil {
 		return err
 	}
 	if err := s.be.Purge(meta); err != nil {
 		return err
 	}
+	if s.dp != nil {
+		// Deletion is total: the object-store history goes too. This is
+		// what makes the per-app epoch counter safely resettable.
+		if err := s.dp.PurgeApp(context.Background(), name); err != nil {
+			s.log.Error("purging object-store data", "app", name, "err", err)
+		}
+	}
 	s.mu.Lock()
 	delete(s.apps, name)
 	s.mu.Unlock()
 	s.log.Info("deleted", "app", name)
 	return nil
+}
+
+// SyncData is the router's D1 hold: block until the app's committed writes
+// are durable at the gateway. Nil data plane = no hold.
+func (s *Supervisor) SyncData(ctx context.Context, name string) error {
+	if s.dp == nil {
+		return nil
+	}
+	return s.dp.Sync(ctx, name)
+}
+
+// StreamStatus returns the app's data-plane manifest (admin API).
+func (s *Supervisor) StreamStatus(ctx context.Context, name string) (*dataplane.Manifest, error) {
+	if s.dp == nil {
+		return nil, errors.New("data plane disabled")
+	}
+	meta, err := s.reg.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	stream := meta.StreamID
+	if stream == "" {
+		stream = "s0"
+	}
+	return s.dp.StreamStatus(ctx, name, stream)
+}
+
+// RestoreData is PITR: quiesce the app, branch its stream at the requested
+// point (atLSN, or atTime if non-zero), rebuild the data disk to it, and
+// leave the app COLD on the new branch. The old stream is never modified —
+// restoring "back to before the restore" remains possible forever (D4).
+func (s *Supervisor) RestoreData(ctx context.Context, name string, atLSN uint64, atTime time.Time) (string, uint64, error) {
+	if s.dp == nil {
+		return "", 0, errors.New("data plane disabled")
+	}
+	a, meta, err := s.app(name)
+	if err != nil {
+		return "", 0, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.FreezeTimeout+s.cfg.WakeTimeout)
+	defer cancel()
+	finish, err := s.claimQuiesce(ctx, a, meta)
+	if err != nil {
+		return "", 0, fmt.Errorf("restore %s: %w", name, err)
+	}
+	defer finish()
+
+	// The disk is about to be replaced by the branch image: the snapshot
+	// pairing bit goes false first, as always.
+	if err := s.reg.SetSnapshotValid(name, false); err != nil {
+		return "", 0, err
+	}
+	stream, lsn, err := s.dp.BranchRestore(ctx, meta, atLSN, atTime)
+	if err != nil {
+		return "", 0, fmt.Errorf("restore %s: %w", name, err)
+	}
+	s.log.Info("restored to branch", "app", name, "stream", stream, "lsn", lsn)
+	return stream, lsn, nil
 }
 
 // Status is the admin API's view of one app.

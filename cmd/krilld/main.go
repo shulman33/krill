@@ -17,7 +17,9 @@ import (
 	"github.com/shulman33/krill/internal/admin"
 	"github.com/shulman33/krill/internal/builder"
 	"github.com/shulman33/krill/internal/config"
+	"github.com/shulman33/krill/internal/dataplane"
 	"github.com/shulman33/krill/internal/host"
+	"github.com/shulman33/krill/internal/objstore"
 	"github.com/shulman33/krill/internal/lifecycle"
 	"github.com/shulman33/krill/internal/network"
 	"github.com/shulman33/krill/internal/registry"
@@ -51,7 +53,8 @@ func run() error {
 	}
 	defer reg.Close()
 
-	be := host.New(cfg, network.NewManager(nil), rootfs.NewManager(cfg.DataDir), log)
+	fs := rootfs.NewManager(cfg.DataDir)
+	be := host.New(cfg, network.NewManager(nil), fs, log)
 	sup := lifecycle.New(reg, be, lifecycle.Config{
 		WakeTimeout: cfg.WakeTimeout,
 		// Freeze = balloon settle + deflate settle + writing guest RAM to
@@ -59,6 +62,20 @@ func run() error {
 		FreezeTimeout: cfg.BalloonSettle + cfg.DeflateSettle + 90*time.Second,
 		IdleTimeout:   cfg.IdleTimeout,
 	}, log)
+	if cfg.DataPlane {
+		spec := cfg.Objstore
+		if spec == "" {
+			spec = "file://" + filepath.Join(cfg.DataDir, "objstore")
+		}
+		store, err := objstore.Open(spec)
+		if err != nil {
+			return err
+		}
+		coord := dataplane.NewCoordinator(dataplane.New(store), reg, fs,
+			uint32(cfg.CellGen), cfg.DataDiskMB, log)
+		sup.SetDataPlane(coord)
+		log.Info("data plane on", "objstore", spec, "cell_gen", cfg.CellGen, "sync_ack", cfg.SyncAck)
+	}
 	if err := sup.Reconcile(); err != nil {
 		return err
 	}
@@ -68,7 +85,9 @@ func run() error {
 	go sup.RunJanitor(ctx)
 
 	bld := builder.New(cfg.DockerBin, filepath.Join(cfg.DataDir, "build"))
-	appSrv := &http.Server{Addr: cfg.ListenAddr, Handler: router.New(sup, log)}
+	rt := router.New(sup, log)
+	rt.SyncAck = cfg.DataPlane && cfg.SyncAck
+	appSrv := &http.Server{Addr: cfg.ListenAddr, Handler: rt}
 	admSrv := &http.Server{Addr: cfg.AdminAddr, Handler: admin.New(sup, bld, admin.DeployConfig{
 		WorkDir:      filepath.Join(cfg.DataDir, "build"),
 		BaseHost:     cfg.BaseHost,
