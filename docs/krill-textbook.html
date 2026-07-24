@@ -1,0 +1,818 @@
+<title>The Sleeping Cloud — A Small Distributed Systems Textbook</title>
+<style>
+  /* ============ tokens ============ */
+  :root {
+    --paper: #F4F7F6;
+    --paper-raised: #FCFDFD;
+    --paper-sunken: #E9EEEC;
+    --ink: #182530;
+    --ink-soft: #3D5260;
+    --muted: #64777F;
+    --line: #CBD6D3;
+    --accent: #C9564A;        /* krill coral */
+    --accent-ink: #A83E33;
+    --sea: #20707E;           /* secondary teal */
+    --sea-soft: #DCEAE8;
+    /* fixed diagram language (project convention — do not repurpose) */
+    --d-edge: #2F6FA8;        /* blue: edge / routing */
+    --d-edge-bg: #E3EDF6;
+    --d-control: #6E56A6;     /* violet: control plane */
+    --d-control-bg: #EBE6F4;
+    --d-dur: #2E7D53;         /* green: durability */
+    --d-dur-bg: #E2F0E8;
+    --d-guest: #B97016;       /* orange: untrusted guest */
+    --d-guest-bg: #F7EBD8;
+    --d-rest: #75828A;        /* gray: at rest */
+    --d-rest-bg: #E8EBEC;
+    --code-bg: #E9EEEC;
+    --shadow: 0 1px 2px rgba(24, 37, 48, 0.07), 0 4px 14px rgba(24, 37, 48, 0.05);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: "Avenir Next", Avenir, "Segoe UI", "Helvetica Neue", ui-sans-serif, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0D1418;
+      --paper-raised: #131C21;
+      --paper-sunken: #0A0F13;
+      --ink: #E2E9E7;
+      --ink-soft: #B7C4C4;
+      --muted: #8DA0A5;
+      --line: #29383E;
+      --accent: #E08170;
+      --accent-ink: #EE9B8C;
+      --sea: #6FBFCB;
+      --sea-soft: #14262B;
+      --d-edge: #6BA6D8;
+      --d-edge-bg: #14222E;
+      --d-control: #A48FD6;
+      --d-control-bg: #1E1930;
+      --d-dur: #62B389;
+      --d-dur-bg: #12261B;
+      --d-guest: #D89A4B;
+      --d-guest-bg: #2A2012;
+      --d-rest: #90A0A8;
+      --d-rest-bg: #1A2226;
+      --code-bg: #162126;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 4px 14px rgba(0,0,0,0.3);
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #F4F7F6; --paper-raised: #FCFDFD; --paper-sunken: #E9EEEC;
+    --ink: #182530; --ink-soft: #3D5260; --muted: #64777F; --line: #CBD6D3;
+    --accent: #C9564A; --accent-ink: #A83E33; --sea: #20707E; --sea-soft: #DCEAE8;
+    --d-edge: #2F6FA8; --d-edge-bg: #E3EDF6; --d-control: #6E56A6; --d-control-bg: #EBE6F4;
+    --d-dur: #2E7D53; --d-dur-bg: #E2F0E8; --d-guest: #B97016; --d-guest-bg: #F7EBD8;
+    --d-rest: #75828A; --d-rest-bg: #E8EBEC; --code-bg: #E9EEEC;
+    --shadow: 0 1px 2px rgba(24, 37, 48, 0.07), 0 4px 14px rgba(24, 37, 48, 0.05);
+  }
+  :root[data-theme="dark"] {
+    --paper: #0D1418; --paper-raised: #131C21; --paper-sunken: #0A0F13;
+    --ink: #E2E9E7; --ink-soft: #B7C4C4; --muted: #8DA0A5; --line: #29383E;
+    --accent: #E08170; --accent-ink: #EE9B8C; --sea: #6FBFCB; --sea-soft: #14262B;
+    --d-edge: #6BA6D8; --d-edge-bg: #14222E; --d-control: #A48FD6; --d-control-bg: #1E1930;
+    --d-dur: #62B389; --d-dur-bg: #12261B; --d-guest: #D89A4B; --d-guest-bg: #2A2012;
+    --d-rest: #90A0A8; --d-rest-bg: #1A2226; --code-bg: #162126;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 4px 14px rgba(0,0,0,0.3);
+  }
+
+  /* ============ base ============ */
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 18px;
+    line-height: 1.65;
+    margin: 0;
+  }
+  .book { max-width: 46rem; margin: 0 auto; padding: 0 1.25rem 6rem; }
+  p { margin: 0 0 1.1em; }
+  a { color: var(--sea); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover { color: var(--accent-ink); }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+  strong { color: var(--ink); }
+  code {
+    font-family: var(--mono); font-size: 0.82em;
+    background: var(--code-bg); padding: 0.12em 0.35em; border-radius: 4px;
+  }
+  h1, h2, h3, h4 { font-family: var(--serif); line-height: 1.2; text-wrap: balance; color: var(--ink); }
+  h2 { font-size: 1.7rem; margin: 0 0 0.6em; font-weight: 600; }
+  h3 { font-size: 1.22rem; margin: 2.4em 0 0.5em; font-weight: 600; }
+  h4 { font-size: 1rem; margin: 1.8em 0 0.4em; font-weight: 700; }
+  .eyebrow {
+    font-family: var(--sans); font-size: 0.72rem; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+  }
+
+  /* ============ cover ============ */
+  .cover { padding: 5.5rem 0 3rem; border-bottom: 1px solid var(--line); }
+  .cover .eyebrow { color: var(--accent-ink); }
+  .cover h1 {
+    font-size: clamp(2.4rem, 6vw, 3.6rem);
+    font-weight: 600; letter-spacing: -0.015em; margin: 0.35em 0 0.3em;
+  }
+  .cover .sub { font-size: 1.18rem; color: var(--ink-soft); max-width: 34em; margin-bottom: 1.6rem; }
+  .cover .colophon { font-family: var(--sans); font-size: 0.8rem; color: var(--muted); }
+
+  /* ============ chapter opener ============ */
+  .chapter { margin-top: 5rem; border-top: 1px solid var(--line); padding-top: 3rem; }
+  .ch-head { display: flex; gap: 1.4rem; align-items: baseline; margin-bottom: 1.2rem; }
+  .ch-num {
+    font-family: var(--serif); font-size: 4.6rem; font-weight: 600; line-height: 1;
+    color: var(--accent); flex: none;
+    font-variant-numeric: lining-nums;
+  }
+  .ch-title-block .eyebrow { margin-bottom: 0.3rem; }
+  .ch-head h2 { font-size: clamp(1.7rem, 4.5vw, 2.3rem); margin: 0; }
+
+  /* what you'll learn */
+  .learn {
+    background: var(--paper-raised); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1.1rem 1.4rem; margin: 1.6rem 0 2.2rem; box-shadow: var(--shadow);
+  }
+  .learn .eyebrow { margin-bottom: 0.5rem; }
+  .learn ul { margin: 0; padding-left: 1.2rem; }
+  .learn li { margin: 0.3em 0; }
+
+  /* ============ the concept / in-krill rhythm ============ */
+  .mode {
+    font-family: var(--sans); font-size: 0.72rem; font-weight: 700;
+    letter-spacing: 0.13em; text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 0.5em;
+    margin: 2.6em 0 0.2em;
+  }
+  .mode::after { content: ""; width: 3.2em; height: 1px; background: currentColor; opacity: 0.4; }
+  .mode.concept { color: var(--sea); }
+  .mode.krill { color: var(--accent-ink); }
+  .mode + h3 { margin-top: 0.15em; }
+
+  /* ============ boxes ============ */
+  .defcard {
+    border-left: 3px solid var(--sea); background: var(--sea-soft);
+    border-radius: 0 8px 8px 0; padding: 0.85rem 1.15rem; margin: 1.4rem 0;
+  }
+  .defcard b:first-child { font-family: var(--sans); font-size: 0.95rem; }
+  .fieldnote {
+    border: 1px dashed var(--line); border-radius: 10px;
+    background: var(--paper-raised);
+    padding: 0.95rem 1.2rem; margin: 1.6rem 0;
+  }
+  .fieldnote .eyebrow { color: var(--d-guest); margin-bottom: 0.35rem; }
+  .fieldnote p:last-child { margin-bottom: 0; }
+  .recap {
+    background: var(--paper-sunken); border-radius: 10px;
+    padding: 1rem 1.3rem; margin: 2.4rem 0 0.8rem;
+  }
+  .recap .eyebrow { color: var(--accent-ink); margin-bottom: 0.4rem; }
+  .recap p { margin: 0; font-size: 1.02rem; }
+  .story {
+    border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+    background: var(--paper-raised); padding: 1.3rem 1.5rem; margin: 2rem 0;
+  }
+  .story .eyebrow { color: var(--d-control); margin-bottom: 0.5rem; }
+
+  /* self-check */
+  .selfcheck { margin: 1.6rem 0 0; }
+  .selfcheck .eyebrow { margin-bottom: 0.6rem; }
+  .selfcheck details {
+    border: 1px solid var(--line); border-radius: 8px; background: var(--paper-raised);
+    margin: 0.5rem 0; padding: 0;
+  }
+  .selfcheck summary {
+    cursor: pointer; padding: 0.7rem 1rem; font-size: 0.98rem;
+    font-weight: 600; color: var(--ink-soft); list-style-position: outside;
+  }
+  .selfcheck details[open] summary { border-bottom: 1px solid var(--line); color: var(--ink); }
+  .selfcheck details p { padding: 0.7rem 1rem 0.2rem; margin: 0 0 0.6rem; font-size: 0.98rem; }
+
+  /* ============ chips / identifiers ============ */
+  .chip {
+    font-family: var(--mono); font-size: 0.74em; font-weight: 600;
+    padding: 0.14em 0.5em; border-radius: 99px; white-space: nowrap;
+    border: 1px solid var(--line); background: var(--paper-raised); color: var(--ink-soft);
+  }
+  .chip.rule { border-color: var(--d-dur); color: var(--d-dur); background: var(--d-dur-bg); }
+  .chip.pt { border-color: var(--d-control); color: var(--d-control); background: var(--d-control-bg); }
+  .chip.gate { border-color: var(--d-edge); color: var(--d-edge); background: var(--d-edge-bg); }
+
+  /* ============ tables ============ */
+  .tablewrap { overflow-x: auto; margin: 1.4rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+  th {
+    font-family: var(--sans); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); text-align: left; padding: 0.5rem 0.9rem 0.4rem 0; border-bottom: 1.5px solid var(--line);
+  }
+  td { padding: 0.55rem 0.9rem 0.55rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* ============ figures / diagrams ============ */
+  figure.diagram {
+    margin: 2rem 0; padding: 1.3rem 1.4rem 1.1rem;
+    background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow); overflow-x: auto;
+  }
+  figure.diagram figcaption {
+    font-family: var(--sans); font-size: 0.85rem; color: var(--muted);
+    margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--line); line-height: 1.5;
+  }
+  figure.diagram figcaption b { color: var(--ink-soft); }
+  .dbox {
+    font-family: var(--sans); font-size: 0.8rem; font-weight: 600; line-height: 1.3;
+    border-radius: 8px; padding: 0.55rem 0.8rem; text-align: center;
+    border: 1.5px solid; min-width: 5.5em;
+  }
+  .dbox small { display: block; font-weight: 400; font-size: 0.85em; opacity: 0.85; margin-top: 0.15em; }
+  .dbox.edge    { color: var(--d-edge);    border-color: var(--d-edge);    background: var(--d-edge-bg); }
+  .dbox.control { color: var(--d-control); border-color: var(--d-control); background: var(--d-control-bg); }
+  .dbox.dur     { color: var(--d-dur);     border-color: var(--d-dur);     background: var(--d-dur-bg); }
+  .dbox.guest   { color: var(--d-guest);   border-color: var(--d-guest);   background: var(--d-guest-bg); }
+  .dbox.rest    { color: var(--d-rest);    border-color: var(--d-rest);    background: var(--d-rest-bg); border-style: dashed; }
+  .darrow {
+    font-family: var(--sans); font-size: 0.74rem; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
+    align-self: center; min-width: 3em; text-align: center;
+  }
+  .darrow::after { content: "⟶"; font-size: 1.15rem; color: var(--ink-soft); }
+  .darrow.down::after { content: "⟶"; transform: rotate(90deg); }
+  .drow { display: flex; gap: 0.7rem; align-items: stretch; flex-wrap: wrap; row-gap: 0.8rem; }
+  .dcol { display: flex; flex-direction: column; gap: 0.7rem; }
+  .dlegend {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.1rem; margin-top: 1rem;
+    font-family: var(--sans); font-size: 0.76rem; color: var(--muted);
+  }
+  .dlegend span { display: inline-flex; align-items: center; gap: 0.4em; }
+  .swatch { width: 0.85em; height: 0.85em; border-radius: 3px; display: inline-block; border: 1.5px solid; }
+  .swatch.edge { background: var(--d-edge-bg); border-color: var(--d-edge); }
+  .swatch.control { background: var(--d-control-bg); border-color: var(--d-control); }
+  .swatch.dur { background: var(--d-dur-bg); border-color: var(--d-dur); }
+  .swatch.guest { background: var(--d-guest-bg); border-color: var(--d-guest); }
+  .swatch.rest { background: var(--d-rest-bg); border-color: var(--d-rest); border-style: dashed; }
+
+  /* ============ toc ============ */
+  .toc { margin: 2.6rem 0 0; }
+  .toc ol { list-style: none; margin: 0.8rem 0 0; padding: 0; counter-reset: ch; }
+  .toc li { border-bottom: 1px solid var(--line); }
+  .toc a {
+    display: flex; align-items: baseline; gap: 1rem; padding: 0.75rem 0.2rem;
+    text-decoration: none; color: var(--ink);
+  }
+  .toc a:hover { color: var(--accent-ink); }
+  .toc .n { font-family: var(--serif); color: var(--accent); font-weight: 600; min-width: 1.4em; font-size: 1.1rem; }
+  .toc .t { font-weight: 600; }
+  .toc .d { color: var(--muted); font-size: 0.92rem; margin-left: auto; text-align: right; font-family: var(--sans); }
+  @media (max-width: 640px) { .toc .d { display: none; } }
+
+  /* misc */
+  .smallcaps { font-variant: small-caps; letter-spacing: 0.04em; }
+  hr.sect { border: none; border-top: 1px solid var(--line); margin: 3rem 0; }
+  .kicker { font-size: 1.13rem; color: var(--ink-soft); }
+</style>
+
+<div class="book">
+
+<!-- ================= COVER ================= -->
+<header class="cover">
+  <div class="eyebrow">Krill · Milestones M1–M4 · A working system, read as a textbook</div>
+  <h1>The Sleeping Cloud</h1>
+  <p class="sub">Four short chapters on how to run a million tiny apps that are asleep almost all the time — and wake in the time it takes to blink. Each chapter teaches the general idea first, then shows the real implementation in this repository.</p>
+  <p class="colophon">Everything measured in this book was measured on real hardware (GCP nested virtualization, 2026-07-23). Identifiers like E1–E6 and PT-9 are the project's actual cross-reference system — the same labels appear in the TLA+ spec, the design docs, and the code.</p>
+
+  <nav class="toc" aria-label="Table of contents">
+    <div class="eyebrow">Contents</div>
+    <ol>
+      <li><a href="#ch0"><span class="n">0</span><span class="t">A cloud for small software</span><span class="d">the problem &amp; the cast</span></a></li>
+      <li><a href="#ch1"><span class="n">1</span><span class="t">Machines that sleep</span><span class="d">M1 · microVMs &amp; the wake path</span></a></li>
+      <li><a href="#ch2"><span class="n">2</span><span class="t">From folder to URL</span><span class="d">M2 · the deploy path</span></a></li>
+      <li><a href="#ch3"><span class="n">3</span><span class="t">The data plane</span><span class="d">M3 · fencing, WALs &amp; proofs</span></a></li>
+      <li><a href="#ch4"><span class="n">4</span><span class="t">The doorman</span><span class="d">M4 · identity at the edge</span></a></li>
+    </ol>
+  </nav>
+</header>
+
+<!-- ================= CH 0 ================= -->
+<section class="chapter" id="ch0">
+  <div class="ch-head">
+    <div class="ch-num">0</div>
+    <div class="ch-title-block">
+      <div class="eyebrow">Prologue</div>
+      <h2>A cloud for small software</h2>
+    </div>
+  </div>
+
+  <p class="kicker">Every cloud you have used was designed around one assumption: that software is <em>awake</em>. Krill is an experiment in deleting that assumption.</p>
+
+  <p>AI assistants now write little applications constantly — a vacation-day tracker, a rota generator, a five-person expense splitter. Call this <strong>small software</strong>: apps with a handful of users, touched a few minutes a day. The economics of normal clouds are absurd for them. A container that idles 99.6% of the time still pays rent 100% of the time, and "sharing the app with a colleague" still means accounts, logins, and deployment ceremony.</p>
+
+  <p>Krill's bet is that a small app should behave like a <em>document</em>: cheap to keep, one click to share, instantly there when opened. The mechanism behind the bet:</p>
+
+  <div class="defcard"><b>Scale to zero.</b> When an app is idle, it does not run slowly or run small — it stops existing as a process. Its entire machine state (memory, devices, registers) is written to disk as a <em>snapshot</em>. A visitor's HTTP request brings it back. If the resurrection is fast enough, the visitor never knows the app was gone.</div>
+
+  <p>At the project's modeled scale — one million apps at a 0.4% duty cycle — the fleet costs about $20k/month, a third of a cent per idle app: roughly 17× cheaper than keeping the same apps resident. The entire system exists to make that number real without breaking two promises: <strong>never lose an acknowledged write</strong>, and <strong>never let two copies of an app both think they're real</strong>. Chapter 3 is about how hard those promises are.</p>
+
+  <h3>The cast of characters</h3>
+  <p>Five actors appear in every chapter. The colors are a fixed language used across all of this project's diagrams — learn them once and every later figure reads faster.</p>
+
+  <figure class="diagram">
+    <div class="dcol">
+      <div class="drow" style="justify-content: space-between; align-items: center;">
+        <div class="dbox edge">Router<small>the front door; holds &amp; replays requests</small></div>
+        <div class="dbox control">krilld<small>the host agent; decides who runs</small></div>
+        <div class="dbox control">Registry<small>SQLite catalog of every app</small></div>
+      </div>
+      <div class="drow" style="justify-content: space-between; align-items: center;">
+        <div class="dbox guest">Guest microVM<small>the app; agent-written, untrusted</small></div>
+        <div class="dbox rest">Snapshots &amp; rootfs<small>machine state, at rest on disk</small></div>
+        <div class="dbox dur">Object store<small>durable truth; the final arbiter</small></div>
+      </div>
+    </div>
+    <div class="dlegend">
+      <span><span class="swatch edge"></span>edge / routing</span>
+      <span><span class="swatch control"></span>control plane</span>
+      <span><span class="swatch guest"></span>untrusted guest</span>
+      <span><span class="swatch rest"></span>at rest</span>
+      <span><span class="swatch dur"></span>durability</span>
+    </div>
+    <figcaption><b>The cast.</b> One physical host runs one <code>krilld</code>, one router, one registry, and many guests — most of them asleep as snapshots. The object store is the only thing whose word is final.</figcaption>
+  </figure>
+
+  <p>One design stance shapes everything: <strong>the guest is untrusted</strong>. The app's code was written by an AI on a user's behalf; it may be buggy, hostile, or both. So the guest is never asked to help with correctness — it isn't trusted to stamp its own writes, keep time, or report its own health. Every safety mechanism in this book lives on the <em>host</em> side of the wall.</p>
+
+  <p>The milestones map cleanly onto the chapters: <span class="chip">M1</span> makes one host sleep and wake apps, <span class="chip">M2</span> gets apps onto the host in one call, <span class="chip">M3</span> makes their data survive anything, and <span class="chip">M4</span> puts identity at the front door. Each milestone shipped against <em>pre-registered acceptance gates</em> — pass/fail criteria frozen before the code was written, then run on real hardware. You'll meet them at the end of each chapter.</p>
+</section>
+
+<!-- ================= CH 1 ================= -->
+<section class="chapter" id="ch1">
+  <div class="ch-head">
+    <div class="ch-num">1</div>
+    <div class="ch-title-block">
+      <div class="eyebrow">Milestone M1 · the host agent</div>
+      <h2>Machines that sleep</h2>
+    </div>
+  </div>
+
+  <div class="learn">
+    <div class="eyebrow">What you'll learn</div>
+    <ul>
+      <li>Why untrusted code gets a whole (micro) virtual machine, not a container</li>
+      <li>How snapshot/restore turns "boot the server" into "resume the server" — and what that costs in milliseconds</li>
+      <li>How a request to a sleeping app is held, not refused: the wake-on-request pattern</li>
+    </ul>
+  </div>
+
+  <div class="mode concept">The concept</div>
+  <h3>1.1 A machine small enough to keep in a file</h3>
+
+  <p>A <strong>virtual machine</strong> is a lie told by hardware: the CPU (via KVM on Linux) lets a host run a guest operating system that believes it owns a computer. The guest has its own kernel, so even a malicious program inside it must break through <em>two</em> walls — its kernel, then the hypervisor — to touch the host. That isolation is why VMs, not containers, are the right home for code written by someone else's AI: containers share the host's kernel, and a shared kernel is a shared attack surface.</p>
+
+  <p>Historically VMs were heavyweight — minutes to boot, gigabytes of overhead — because they emulated a full PC: BIOS, PCI bus, VGA card, floppy controller. A <strong>microVM</strong> deletes the nostalgia. Firecracker (the VMM built for AWS Lambda) emulates almost nothing: a virtio disk, a virtio network device, a serial console, and that's about it. A guest kernel boots in ~150&nbsp;ms, and each VM costs megabytes, not gigabytes. You control it over a local API socket: <em>create machine → attach kernel and disk → attach network → start</em>.</p>
+
+  <div class="defcard"><b>microVM.</b> A virtual machine with a minimal device model, designed to be created and destroyed like a process while retaining hardware-level isolation. Krill runs every app in one.</div>
+
+  <div class="mode concept">The concept</div>
+  <h3>1.2 Snapshot/restore: sleep instead of shutdown</h3>
+
+  <p>Booting even a fast VM means running a kernel's init, starting a runtime, importing libraries. But there is a second path. <strong>Pause</strong> the VM, write its guest memory and device state to two files, and kill the process. Later, map those files back into a fresh VMM and <strong>resume</strong>: every process inside continues from the exact instruction it was on, TCP listeners still listening, caches still warm. The guest does not know time passed. This is snapshot/restore, and it converts "start the app" (hundreds of ms to seconds, running <em>your</em> code) into "restore the machine" (a memory-mapping problem with a fixed cost).</p>
+
+  <p>The benchmark that green-lit this whole architecture measured the gap on real hardware: booting the guest cold took 1,649&nbsp;ms; resuming it from a snapshot took 114&nbsp;ms (p50) — a 14.5× win, with each sleeping app costing ~69&nbsp;MB of disk after deduplication. Cheap enough, fast enough: commit.</p>
+
+  <div class="mode concept">The concept</div>
+  <h3>1.3 Wake-on-request: hold the door</h3>
+
+  <p>Who wakes a sleeping app? The elegant answer: its own traffic. A reverse proxy sits in front of every app. When a request arrives for a frozen app, the proxy does not return an error — it <strong>holds the request</strong>, asks the host agent to restore the snapshot, waits for the guest to answer, then forwards the held request as if nothing happened. To the visitor, a sleeping app is indistinguishable from a running one, except the first click costs an extra fraction of a second.</p>
+
+  <p>Two disciplines make this honest. First, <em>single-flight</em>: if fifty requests arrive for the same frozen app, exactly one wake happens; the other forty-nine wait on it. Second, <em>measure on the host</em>: a guest's clock jumps forward across resume (it slept; its clock didn't), so any latency measured inside the guest is fiction. Every number in this book was taken on the host side.</p>
+
+  <div class="mode krill">In Krill</div>
+  <h3>1.4 krilld: one daemon, five jobs</h3>
+
+  <p><code>krilld</code> is a single Go daemon composed of packages that map one-to-one onto the concepts above: <code>internal/firecracker</code> drives the VMM's API socket (the exact call sequence was ported from the benchmark's shell scripts, then pinned by tests); <code>internal/registry</code> is a SQLite catalog of every app — its rootfs, snapshot paths, state, and network identity; <code>internal/network</code> gives each app a tap device and its own /30 subnet; <code>internal/rootfs</code> manages a golden disk image per app plus a fresh copy-on-write clone per resume; and <code>internal/lifecycle</code> owns the state machine that ties them together.</p>
+
+  <figure class="diagram">
+    <div class="drow" style="align-items: center; justify-content: center;">
+      <div class="dbox rest">FROZEN<small>snapshot on disk, no process</small></div>
+      <div class="darrow">request<br>arrives</div>
+      <div class="dbox control">WAKING<small>restore in flight, single-flight</small></div>
+      <div class="darrow">guest<br>answers</div>
+      <div class="dbox guest">ACTIVE<small>VM running, serving</small></div>
+      <div class="darrow">idle<br>timeout</div>
+      <div class="dbox control">SNAPSHOTTING<small>pause → write state</small></div>
+    </div>
+    <figcaption><b>The lifecycle state machine.</b> <code>SNAPSHOTTING</code> loops back to <code>FROZEN</code>, completing the cycle. Two states sit off the main loop: <code>COLD → BOOTING</code> for an app with no snapshot yet, and <code>DEPLOYING</code>, which claims an app while its disk is being rebuilt. A janitor goroutine demotes idle apps unattended (idle timeout, in-flight count zero), and a crash-reconcile pass at startup repairs any state the daemon died in the middle of. Freezing an app with requests in flight is refused (<code>ErrBusy</code>) — the gates learned to poll for the <code>FROZEN</code> postcondition rather than trust a single freeze call.</figcaption>
+  </figure>
+
+  <div class="mode krill">In Krill</div>
+  <h3>1.5 The anatomy of a wake, in milliseconds</h3>
+
+  <p>M1's headline gate (<span class="chip gate">A1</span>) demanded: <code>curl</code> a frozen app, get a 200, warm-wake p99 ≤ 300&nbsp;ms over 100 wakes. It passed at 298&nbsp;ms — and the instrumented breakdown is more interesting than the pass:</p>
+
+  <figure class="diagram">
+    <div style="display:flex; gap:3px; align-items:stretch;">
+      <div class="dbox control" style="flex: 45 1 0; min-width: 8em; border-radius: 8px 2px 2px 8px;">~45 ms<small>krilld: load snapshot, resume VM</small></div>
+      <div class="dbox guest" style="flex: 13 0 auto; min-width: 0; border-radius: 2px;">~13<small>kernel</small></div>
+      <div class="dbox guest" style="flex: 200 1 0; min-width: 9em; border-radius: 2px 8px 8px 2px;">~200 ms<small>guest userspace serves its first request</small></div>
+    </div>
+    <figcaption><b>Where a warm wake spends its time.</b> The platform's own machinery is ~45&nbsp;ms; the guest's kernel is answering TCP just ~13&nbsp;ms after resume. The dominant cost is the <em>guest's own runtime</em> waking up — a constant ~200&nbsp;ms "userspace tax" that is not the balloon and not pause-duration-dependent (both falsified experimentally). Likely lever: snapshot the guest mid-hot-loop instead of idle. With the full M3 data plane attached, the end-to-end wake still lands at p50 205&nbsp;ms.</figcaption>
+  </figure>
+
+  <div class="fieldnote">
+    <div class="eyebrow">Field notes · learned on hardware, kept forever</div>
+    <p><strong>The ARP race.</strong> A restored guest's ARP cache is a photograph of the network at snapshot time. Give a tap device a random MAC on resume and the guest will confidently send packets to a MAC that no longer exists — for 30 seconds, the app is deaf. The fix is deterministic: each app's tap MAC is derived from its identity, so the photograph stays true. Corollary: the host pins neighbor entries, because the host-side ARP path races the resume in the other direction.</p>
+    <p><strong>Never resume memory against a mutated disk.</strong> A memory snapshot embeds the guest kernel's beliefs about its filesystem (page cache, inode state). Resuming it over a disk that changed is silent corruption. Every resume therefore gets a fresh copy-on-write clone of the golden rootfs — and snapshots never cross a Firecracker version, kernel, or CPU-type boundary.</p>
+    <p><strong>The balloon tradeoff, measured.</strong> Inflating a memory balloon before snapshotting shrinks the file by ~32&nbsp;MB/app but costs ~6&nbsp;s of freeze time, with zero effect on wake latency. Default: on. Flag: <code>--snapshot-balloon=false</code>.</p>
+  </div>
+
+  <h3>1.6 The gates</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Gate</th><th>Claim it forces to be true</th><th>Result</th></tr>
+    <tr><td><span class="chip gate">A1</span></td><td>Wake is fast: frozen app answers <code>curl</code> with 200, p99 ≤ 300 ms over 100 wakes</td><td class="num">PASS · 298 ms</td></tr>
+    <tr><td><span class="chip gate">A2</span></td><td>Sleep is real: idle timeout demotes to FROZEN unattended, VMM process gone, RAM freed</td><td class="num">PASS</td></tr>
+    <tr><td><span class="chip gate">A3</span></td><td>Sleep is safe: 100 sleep/wake cycles under SQLite writes — zero corruption, zero lost acked writes</td><td class="num">PASS · 100/100</td></tr>
+    <tr><td><span class="chip gate">A4</span></td><td>Sleep is dense: 10 frozen apps on one host, any of them wakeable, identities intact</td><td class="num">PASS · 10/10</td></tr>
+  </table></div>
+
+  <div class="recap">
+    <div class="eyebrow">If you remember one thing</div>
+    <p>Krill doesn't start and stop apps — it <em>pauses machines</em>. Everything else in M1 (the router that holds requests, the state machine, the MAC determinism) exists to make "your app was a file until 205 ms ago" undetectable.</p>
+  </div>
+
+  <div class="selfcheck">
+    <div class="eyebrow">Check yourself</div>
+    <details><summary>Why microVMs instead of containers, when containers are lighter?</summary><p>The tenant code is agent-written and untrusted. Containers share the host kernel, so one kernel bug is a full-host compromise. A microVM interposes a second kernel and a minimal hypervisor between tenant and host, while Firecracker keeps the per-VM cost close enough to a container's for the economics to survive.</p></details>
+    <details><summary>Fifty requests hit the same frozen app at once. How many snapshot restores happen, and what do the other requests do?</summary><p>One. Wakes are single-flight: the first request triggers the restore, the rest park on the same in-flight wake and are all replayed to the guest when it answers.</p></details>
+    <details><summary>Why is a latency number measured inside the guest worthless?</summary><p>The guest's clock jumps across resume — it was frozen while the world moved on. Only host-side clocks observe the wake continuously, which is why every gate measures from the host (and why Chapter 3's protocol will refuse to trust guest-side timers for leases, too).</p></details>
+  </div>
+</section>
+
+<!-- ================= CH 2 ================= -->
+<section class="chapter" id="ch2">
+  <div class="ch-head">
+    <div class="ch-num">2</div>
+    <div class="ch-title-block">
+      <div class="eyebrow">Milestone M2 · the deploy path</div>
+      <h2>From folder to URL</h2>
+    </div>
+  </div>
+
+  <div class="learn">
+    <div class="eyebrow">What you'll learn</div>
+    <ul>
+      <li>Why a container image isn't a bootable machine, and what it takes to make one</li>
+      <li>What "deploy in one call" really requires: verification and legible failure, not just upload</li>
+      <li>How the platform meets its real customer — an AI coding agent — through MCP</li>
+    </ul>
+  </div>
+
+  <div class="mode concept">The concept</div>
+  <h3>2.1 An image is not a machine</h3>
+
+  <p>Chapter 1's VMs need two artifacts to boot: a <strong>kernel</strong> and a <strong>root filesystem</strong> — a block device holding the app's files. The world's lingua franca for describing an app's files is the Dockerfile, so Krill accepts one. But <code>docker build</code> produces a <em>container image</em>: a stack of filesystem layers meant to run under a host's existing kernel, with no init system, often no network tooling, sometimes not even a shell. A VM, by contrast, boots into the void — PID 1 is whatever you say it is, and nobody has configured the network card.</p>
+
+  <p>So a deploy pipeline for microVMs has one essential job: <em>flatten a container image into a bootable disk, and supply the missing first breath</em> — the init program that mounts the basics, brings up networking, and hands control to the app's own command.</p>
+
+  <div class="mode concept">The concept</div>
+  <h3>2.2 A deploy is a claim, so verify it</h3>
+
+  <p>"Deploy in one call" is easy to fake: accept the upload, return a URL, hope. The honest version treats the URL as a <em>claim</em> — "this app now serves traffic" — and refuses to return it unverified. And because the deployer here is usually an AI agent iterating in a loop, <em>failure</em> must be as legible as success: a broken app should return its own stack trace in the deploy response, not a generic 500 to be excavated from remote logs. Fast, truthful feedback is the entire developer experience when the developer is a machine.</p>
+
+  <div class="mode krill">In Krill</div>
+  <h3>2.3 The pipeline: tar in, golden disk out</h3>
+
+  <p>Deploying is one HTTP call: <code>POST /v1/apps/{name}/deploy</code> with a tar.gz of the app directory. Server-side, <code>internal/builder</code> runs the flattening:</p>
+
+  <figure class="diagram">
+    <div class="drow" style="align-items: center;">
+      <div class="dbox rest">App folder<small>Dockerfile + code, tar.gz</small></div>
+      <div class="darrow">upload</div>
+      <div class="dbox control">docker build<small>then docker export: one flat file tree</small></div>
+      <div class="darrow">inject</div>
+      <div class="dbox control">krill-init.sh<small>generated PID 1</small></div>
+      <div class="darrow">mkfs.ext4 -d</div>
+      <div class="dbox rest">golden.ext4<small>bootable rootfs disk</small></div>
+      <div class="darrow">boot once</div>
+      <div class="dbox guest">Verify<small>wake it, probe it</small></div>
+      <div class="darrow">200 OK</div>
+      <div class="dbox edge">URL<small>live, proven</small></div>
+    </div>
+    <figcaption><b>The deploy pipeline.</b> <code>docker export</code> flattens the image's layers into a plain directory; <code>mkfs.ext4 -d</code> builds a filesystem <em>from</em> that directory in one step — no loop devices, no mounts, so a crashed build has nothing to leak. The generated <code>/krill-init.sh</code> mounts <code>/proc</code>, <code>/sys</code>, <code>/dev</code> (and, since M3, the data disk at <code>/data</code>), restores the image's env vars and working directory, then <code>exec</code>s the image's own CMD. The image's metadata (Env, Cmd, Entrypoint, WorkingDir) is read via <code>docker inspect</code> so arbitrary Dockerfiles keep their meaning.</figcaption>
+  </figure>
+
+  <p>Measured on hardware (<span class="chip gate">B1</span>): a plain Dockerfile directory becomes a verified, serving URL in 22&nbsp;s with a cold Docker cache, 4&nbsp;s warm; a redeploy takes about 6&nbsp;s. When the app is broken, the deploy response carries the guest's actual Python traceback (<span class="chip gate">B3</span>), parsed out of the serial console log by <code>internal/guestlog</code>.</p>
+
+  <div class="mode krill">In Krill</div>
+  <h3>2.4 The network contract, or: the kernel does the plumbing</h3>
+
+  <p>Each app owns a /30 subnet (<code>172.16.N.0/30</code>, allocated by the registry as the smallest free slot) which determines its tap device, both IPs, and both deterministic MACs — the network identity survives redeploys. The find of the milestone: the Firecracker CI kernel is built with <code>CONFIG_IP_PNP</code>, so krilld appends <code>ip=&lt;guest&gt;::&lt;gw&gt;:&lt;mask&gt;::eth0:off</code> to the boot arguments and <em>the kernel itself configures eth0 before userspace starts</em>. Images need no <code>iproute2</code>, no <code>ifconfig</code>, nothing — genuinely arbitrary Dockerfiles deploy unmodified. (The generated init still brings up the interface when tools exist, as a fallback.)</p>
+
+  <div class="mode krill">In Krill</div>
+  <h3>2.5 Two front doors: a CLI for humans, MCP for agents</h3>
+
+  <p>Both clients are thin wrappers over the same loopback admin API. <code>krill deploy ./dir</code> gives humans the one-liner (plus <code>apps</code>, <code>status</code>, <code>logs</code>, <code>wake</code>, <code>freeze</code>, <code>delete</code>). The TypeScript MCP server (<code>mcp/</code>) exposes <code>deploy</code>, <code>logs</code>, <code>apps</code>, and <code>delete_app</code> as tools — so a coding agent's "deploy this" becomes one <code>tools/call</code> that returns a URL, closing the loop the platform was designed for: <em>an AI writes an app, an AI deploys it, a human just gets a link</em>. Gate <span class="chip gate">B4</span> proved that path end to end.</p>
+
+  <div class="fieldnote">
+    <div class="eyebrow">Field notes</div>
+    <p><strong>Contracts change; gates record which era they tested.</strong> In M2, redeploy deliberately <em>reset</em> app data — the disk is rebuilt from a new golden image, and durable data wasn't built yet. Gate B2 asserted that reset. M3 then added the separate <code>/data</code> disk, and the contract flipped: redeploys now preserve data, and B2's assertion is a historical record, not a current promise.</p>
+    <p><strong>Small tools bite too:</strong> Go's <code>flag</code> package stops parsing at the first positional argument, so <code>krill deploy ./dir --json</code> silently ignored <code>--json</code> and cost the first gate run. The CLI now parses flags in any position.</p>
+    <p><strong>The next trust boundary is the build itself.</strong> Notice what this chapter quietly did: it runs <code>docker build</code> on the host, against an uploaded context — attacker-supplied instructions executing <em>during the build</em>, outside any microVM. That's acceptable while the only deployer is the platform's owner, and the recorded plan (ROADMAP decision #8) closes it before anyone untrusted can deploy: rootless BuildKit, kaniko, or the self-respecting option — running builds inside a throwaway Krill microVM.</p>
+  </div>
+
+  <h3>2.6 The gates</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Gate</th><th>Claim it forces to be true</th><th>Result</th></tr>
+    <tr><td><span class="chip gate">B1</span></td><td>One command, plain Dockerfile dir → verified serving URL</td><td class="num">PASS · 22 s cold / 4 s warm</td></tr>
+    <tr><td><span class="chip gate">B2</span></td><td>Redeploy replaces the app; stale snapshot can never serve</td><td class="num">PASS · 6 s</td></tr>
+    <tr><td><span class="chip gate">B3</span></td><td>A broken app's own traceback comes back in the deploy response</td><td class="num">PASS</td></tr>
+    <tr><td><span class="chip gate">B4</span></td><td>One MCP <code>tools/call deploy</code> → URL + ready, end to end</td><td class="num">PASS</td></tr>
+  </table></div>
+
+  <div class="recap">
+    <div class="eyebrow">If you remember one thing</div>
+    <p>M2 is a translation layer with an honesty policy: it flattens the world's app format (a Dockerfile) into Krill's machine format (a bootable ext4 + generated init), and it never says "deployed" without having watched the app answer a real request.</p>
+  </div>
+
+  <div class="selfcheck">
+    <div class="eyebrow">Check yourself</div>
+    <details><summary>Why does <code>docker build</code> output need an injected init script before a microVM can use it?</summary><p>A container image expects a host kernel with namespaces already set up around it. A VM boots bare: something must be PID&nbsp;1, mount <code>/proc</code>/<code>/sys</code>/<code>/dev</code>, get the network up, and exec the app's command. <code>krill-init.sh</code> is that something, generated per app from the image's own metadata.</p></details>
+    <details><summary>What makes it safe to deploy an image that contains no networking tools at all?</summary><p>The guest kernel has <code>CONFIG_IP_PNP</code>, and krilld passes the app's addresses via the <code>ip=</code> boot argument — the kernel configures eth0 itself, before any userspace runs. The image contributes nothing to networking.</p></details>
+    <details><summary>Why is returning the app's traceback in the deploy response worth gate status (B3)?</summary><p>Because the deployer is usually an agent in a fix-and-retry loop. A structured traceback in the response is the difference between one-shot self-correction and a blind guessing game against a generic error page.</p></details>
+  </div>
+</section>
+
+<!-- ================= CH 3 ================= -->
+<section class="chapter" id="ch3">
+  <div class="ch-head">
+    <div class="ch-num">3</div>
+    <div class="ch-title-block">
+      <div class="eyebrow">Milestone M3 · the data plane</div>
+      <h2>The data plane</h2>
+    </div>
+  </div>
+
+  <div class="learn">
+    <div class="eyebrow">What you'll learn</div>
+    <ul>
+      <li>The two classic distributed-systems demons — lost writes and split brain — and why a sleeping cloud summons both on purpose</li>
+      <li>Fencing: how monotonically increasing <em>epochs</em>, checked at the storage layer, make a stale writer harmless</li>
+      <li>How a formal spec (TLA+) caught a bug nine hand-written scenarios and a human review missed — and then became a permanent test oracle</li>
+    </ul>
+  </div>
+
+  <p class="kicker">Chapters 1 and 2 built a cloud that sleeps. This chapter makes it safe for the apps to trust it with their data — which is harder than it sounds, because a machine that can be paused at any instant and revived weeks later is a machine that breaks most textbook assumptions on purpose.</p>
+
+  <div class="mode concept">The concept</div>
+  <h3>3.1 What "saved" means: the durability contract</h3>
+
+  <p>Every storage system owes its users one crisp definition: <em>at what moment is a write safe?</em> The honest answer can't be "when the app's local disk has it" — hosts die, and in Krill an app's local disk is rebuilt routinely. So the contract, stated up front as four rules:</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>Rule</th><th>The promise</th></tr>
+    <tr><td><span class="chip rule">D1</span></td><td>A write is acknowledged only after its WAL frames are accepted by the storage gateway <em>under the current epoch</em>. Durability before ack, always — costs a few ms of write latency.</td></tr>
+    <tr><td><span class="chip rule">D2</span></td><td>Local NVMe is a cache. It never counts toward durability, no matter how fast it fsyncs.</td></tr>
+    <tr><td><span class="chip rule">D3</span></td><td>Gateway → object storage replication is async: losing a host costs zero writes; losing a region costs a documented few seconds.</td></tr>
+    <tr><td><span class="chip rule">D4</span></td><td>Point-in-time restore never rewrites history. "Roll back to 3 pm" creates a <em>branch</em> — a new lineage referencing the old one as an immutable prefix.</td></tr>
+  </table></div>
+
+  <div class="defcard"><b>Write-ahead log (WAL).</b> Instead of editing the database file in place, SQLite first appends each transaction's changed pages to a log file. The log <em>is</em> the recent history of the database — which makes it the perfect unit to ship somewhere safer. Krill's whole data plane is, at heart, a machine for moving one SQLite WAL into object storage correctly.</div>
+
+  <div class="mode concept">The concept</div>
+  <h3>3.2 The second writer: split brain</h3>
+
+  <p>Here is the founding nightmare of distributed systems. Host 1 runs your app. The network between Host 1 and the world hiccups. The platform, unable to reach Host 1, reasonably concludes it's dead and starts the app on Host 2. But Host 1 isn't dead — it's <em>partitioned</em>, still running, still buffering writes. When the network heals, two hosts both believe they own the same database. This is <strong>split brain</strong>, and the project's pressure-test catalog opens with it as <span class="chip pt">PT-1</span>, "the partition zombie."</p>
+
+  <figure class="diagram">
+    <div class="drow" style="align-items: center; justify-content: center;">
+      <div class="dcol">
+        <div class="dbox guest">Host 1 · the zombie<small>epoch 5 · partitioned, still buffering writes</small></div>
+        <div class="dbox control">Host 2 · the successor<small>epoch 6 · legitimately took over</small></div>
+      </div>
+      <div class="dcol" style="justify-content: center; gap: 1.6rem;">
+        <div class="darrow">append @ e5 · ✗ rejected</div>
+        <div class="darrow">append @ e6 · ✓ accepted</div>
+      </div>
+      <div class="dbox dur" style="align-self: center;">Storage gateway<small>current epoch: 6 · epoch 5 is sealed</small></div>
+    </div>
+    <figcaption><b>PT-1, resolved by fencing.</b> When the partition heals, the zombie pushes its buffered epoch-5 writes. The gateway compares epochs, rejects, and the rejection doubles as a kill signal — the host agent destroys the zombie instance. Nothing the zombie wrote after the takeover was ever <em>acknowledged</em> (D1 required gateway acceptance for that), so no promise is broken.</figcaption>
+  </figure>
+
+  <p>Note what fencing does <em>not</em> do: it doesn't prevent the zombie from existing, running, or trying. It makes the zombie's writes <em>unable to land</em>. Prevention is impossible in an asynchronous network; harmlessness is achievable.</p>
+
+  <div class="mode concept">The concept</div>
+  <h3>3.3 Why leases lie on this platform</h3>
+
+  <p>The standard tool for "who currently owns X" is a <strong>lease</strong>: a lock with an expiry time, renewed by heartbeat. Leases are fine — until you ask <em>who checks the clock</em>. A lease holder that stalls (GC pause, scheduler hiccup) can wake up past its expiry and act on a belief that has quietly become false. In most systems that's a rare misfortune. In Krill it is the <em>normal operating mode</em>: freezing a VM mid-request and resuming it weeks later is the product. An in-guest lease timer would be wrong after every single nap. This is <span class="chip pt">PT-3</span>, "paused clocks" — the platform's defining hazard, and the reason Chapter 1's rule ("never trust guest time") returns here as a correctness principle.</p>
+
+  <div class="defcard"><b>The design stance: leases route, epochs protect.</b> Krill still uses leases — held by the <em>host agent</em>, never the guest — but only as an optimization that decides who <em>probably</em> should run. The lease is allowed to be wrong. Correctness comes from every externally visible effect being individually checked downstream, against a fencing token.</div>
+
+  <div class="mode concept">The concept</div>
+  <h3>3.4 Epochs: a number that only goes up</h3>
+
+  <p>A <strong>fencing token</strong> (Krill calls it an <em>epoch</em>) is a counter incremented every time ownership of an app changes hands. Every wake mints a fresh, strictly larger epoch. Every effect the instance produces — every WAL segment, every snapshot manifest — is stamped with the epoch it was produced under. Now any downstream system can settle "is this writer current?" with an integer comparison, no clocks involved. A stalled, partitioned, or long-frozen writer carries a small number into a world that has moved on to a bigger one, and every door closes politely in its face.</p>
+
+  <p>Two refinements make the idea industrial-strength. First, the epoch is a composite — <code>cell_generation&nbsp;‖&nbsp;counter</code>, compared as one 64-bit integer — so if the control plane itself is ever rebuilt, bumping the generation instantly out-ranks every number minted before the loss. Second, <em>the arbiter must be the storage, not a server in front of it</em>. Gateway processes can split-brain too (<span class="chip pt">PT-4</span>). So the authoritative record — the stream <strong>manifest</strong> — lives in object storage, and every mutation is a <strong>conditional PUT</strong>: "write this only if the manifest's generation is still G." Two racing writers both try; the object store, which is linearizable, lets exactly one win; the loser re-reads and re-decides. The gateway is merely a cache of what the object store has agreed to.</p>
+
+  <div class="mode krill">In Krill</div>
+  <h3>3.5 The six rules, E1–E6</h3>
+
+  <p>The protocol compresses into six rules. They are stated in the pressure-test doc, enforced as actions in the TLA+ spec, drawn as fence pills in the architecture diagrams, and implemented in <code>internal/dataplane</code> — same identifiers everywhere.</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>Rule</th><th>What it says</th><th>Where it lives in code</th></tr>
+    <tr><td><span class="chip rule">E1</span></td><td>The epoch is <code>cell_gen ‖ counter</code>, one integer, minted by compare-and-swap on every acquisition.</td><td><code>registry.MintEpoch</code> — one SQL upsert, strictly monotone per app</td></tr>
+    <tr><td><span class="chip rule">E2</span></td><td>Every externally visible effect carries its epoch. No effect is unstamped.</td><td>the Shipper stamps every WAL segment it ships</td></tr>
+    <tr><td><span class="chip rule">E3</span></td><td>The gateway accepts an append only at the current epoch (a higher one first seals the old); lower is rejected, and rejection means <em>kill your instance</em>.</td><td><code>Gateway.AppendSegment</code>; <code>OnFenced</code> → <code>killZombie</code></td></tr>
+    <tr><td><span class="chip rule">E4</span></td><td>The manifest lives in object storage; every mutation is a conditional PUT. The object store, not the gateway, is the arbiter of record.</td><td><code>objstore.PutCAS</code> — fsstore, GCS, or memory backend, one contract test over all three</td></tr>
+    <tr><td><span class="chip rule">E5</span></td><td>Snapshot <em>registration</em> is itself fenced: a manifest stamped with a below-current epoch is rejected. Unregistered snapshots are garbage.</td><td><code>Gateway.RegisterCheckpoint</code> — the fence that saves the day in PT-9</td></tr>
+    <tr><td><span class="chip rule">E6</span></td><td>A resuming instance must, in order: acquire a fresh epoch → replay the WAL delta from its snapshot to the stream head → only then open the gate. The host enforces this; the guest is never asked.</td><td><code>Coordinator.PrepareWake</code>, called from the supervisor before the guest runs</td></tr>
+  </table></div>
+
+  <div class="mode krill">In Krill</div>
+  <h3>3.6 Shipping the WAL from outside the VM</h3>
+
+  <p>Recall the stance: the guest is untrusted, so the guest cannot ship its own writes (a hostile app could stamp any epoch it likes — that isn't fencing, it's asking nicely). Instead the <em>host</em> reads the guest's database from outside. Since M3, every app gets a second virtio disk mounted at <code>/data</code>, holding its SQLite file. The host can read that disk image directly — which sounds simple and hides two lovely problems.</p>
+
+  <p>First, parsing: the host reads raw SQLite WAL bytes with its own parser (<code>internal/sqlitewal</code>), trusting nothing. The WAL format helps — every frame is covered by a cumulative checksum chain, so a torn or in-progress write self-invalidates, and the parser replays only up to the last complete <em>commit boundary</em>. Second, freshness: after a guest fsync, the newest ext4 metadata (a file's size, even its directory entry) may exist <em>only in the filesystem's jbd2 journal</em>, not yet in the main structures. So the host's read-only ext4 reader (<code>internal/ext4</code>) replays the journal — the same recovery a kernel performs mounting a crashed disk — before trusting any metadata. Get this wrong and you'd ship stale data while believing yourself current.</p>
+
+  <figure class="diagram">
+    <div class="drow" style="align-items: center;">
+      <div class="dbox guest">App code<small>INSERT → SQLite → fsync</small></div>
+      <div class="darrow">writes</div>
+      <div class="dbox rest">/data disk<small>app.db + WAL, ext4</small></div>
+      <div class="darrow">host tails<br>(ext4 + jbd2 replay)</div>
+      <div class="dbox control">Shipper<small>parse WAL · stamp epoch <b>E2</b></small></div>
+      <div class="darrow">append</div>
+      <div class="dbox dur">Gateway<small>fence check <b>E3</b></small></div>
+      <div class="darrow">CAS <b>E4</b></div>
+      <div class="dbox dur">Object store<small>segments + manifest</small></div>
+    </div>
+    <figcaption><b>The write path, every effect fenced.</b> The guest only ever talks to its local disk; the trusted side of the wall does the shipping. Meanwhile the router enforces <span class="chip rule">D1</span> as <em>sync-ack</em>: when a response is about to leave the platform, it is held until the writes behind it are durable — a failure becomes a 502, never a false "saved." Measured cost of all this machinery on the wake path: wake p50 went from ~298 ms to 205 ms territory — the fencing is latency-noise next to Chapter 1's guest-userspace tax.</figcaption>
+  </figure>
+
+  <div class="fieldnote">
+    <div class="eyebrow">Field notes</div>
+    <p><strong>WAL resets are normal, not exceptional.</strong> SQLite periodically checkpoints and restarts its WAL (by default after ~1000 pages) — under a tailing shipper, the log it's reading vanishes and restarts. The shipper detects it (the WAL's salt values change) and answers with a <em>rebase segment</em>: a full database image at one LSN. Durability is never at risk; point-in-time granularity just coarsens across the jump.</p>
+    <p><strong>The durability boundary is the guest's fsync.</strong> An app running <code>synchronous=NORMAL</code> has commits SQLite itself would lose on power cut — the tailer can't see them either, and sync-ack can't hold for what's invisible. Apps wanting the full D1 guarantee run <code>synchronous=FULL</code>.</p>
+  </div>
+
+  <div class="mode krill">In Krill</div>
+  <h3>3.7 Waking without lying, and time travel without rewriting</h3>
+
+  <p>The dangerous moment is the wake. <code>PrepareWake</code> runs the <span class="chip rule">E6</span> sequence before one guest instruction executes: mint a fresh epoch (<span class="chip rule">E1</span>), write a fenced <strong>takeover seal</strong> into the manifest (a real CAS write — so a <em>stale</em> waker dies right here, before it can serve a byte), then compare the local <code>/data</code> disk against the durable history and rebuild it from the object store if it has diverged. Restore-from-nothing is the same path: latest checkpoint at-or-below the target, plus WAL-delta replay to the head. Gate <span class="chip gate">C1</span> made this concrete: SIGKILL the app, delete <em>every</em> app-local file, and all 200 acknowledged rows come back byte-identical from the object store alone.</p>
+
+  <p>Point-in-time restore honors <span class="chip rule">D4</span>: history is never truncated (a deleted suffix could always be resurrected by some replica that still has it — <span class="chip pt">PT-8</span>). Instead, <code>krill restore --at-time</code> creates a <em>branch</em>: a new stream whose manifest references the parent stream as an immutable prefix up to the restore point. The parent, including the "bad" suffix you rolled back past, remains intact and recoverable — rollback and revision history become the same feature.</p>
+
+  <figure class="diagram">
+    <div class="dcol">
+      <div class="drow" style="align-items: center;">
+        <div class="dbox dur">Stream s0<small>seg · seg · seg · seg · seg → head (untouched)</small></div>
+      </div>
+      <div class="drow" style="align-items: center; padding-left: 3.2rem;">
+        <div class="darrow" style="min-width:0;">branch at LSN of "3 pm"</div>
+        <div class="dbox dur">Stream s1<small>parent: s0 ≤ LSN · new writes continue here</small></div>
+      </div>
+    </div>
+    <figcaption><b>PITR as branching (D4).</b> The new lineage points at the old one instead of rewriting it — git's mental model applied to a database. Gate <span class="chip gate">C3</span> verified both directions: the branch serves exactly the pre-restore data, and the parent's "lost" suffix is still recoverable from the original stream.</figcaption>
+  </figure>
+
+  <div class="mode concept">The concept</div>
+  <h3>3.8 Proving it: the model checker as a colleague</h3>
+
+  <p>How do you trust a protocol like this? Testing samples reality; a <strong>model checker</strong> exhausts a small universe of it. The protocol is written as a TLA+ specification (<code>FencingProtocol.tla</code>): state variables (the WAL, the manifest, each host's beliefs), actions (acquire a lease, write, seal, crash, <em>lease-expires-without-telling-the-holder</em> — the action that creates every zombie), and invariants that must hold in every reachable state. TLC, the checker, then explores all 26,618 reachable states. The four invariants are the moral core of the chapter:</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>Invariant</th><th>What must always be true</th></tr>
+    <tr><td><span class="chip rule">I1</span></td><td>Single writer: after an epoch is sealed, no earlier epoch's segments ever interleave into the stream.</td></tr>
+    <tr><td><span class="chip rule">I2</span></td><td>No lost ack: every client-acknowledged write is in the prefix the next epoch replays.</td></tr>
+    <tr><td><span class="chip rule">I3</span></td><td>Snapshot lineage: every registered snapshot lies <em>on</em> the accepted history — no snapshot forks it.</td></tr>
+    <tr><td><span class="chip rule">I4</span></td><td>Monotonic wake: a resumed instance produces no effect under its pre-pause epoch.</td></tr>
+  </table></div>
+
+  <p>Just as important is checking that the model can <em>fail</em>. The spec has three fence switches — gateway fencing (E3/E4), replay-on-restore (E6), registration fencing (E5) — and CI flips each one off and asserts TLC <em>finds a counterexample</em>. A fence that can't fail when disabled is a fence the model no longer exercises.</p>
+
+  <div class="story">
+    <div class="eyebrow">The PT-9 story · why this project trusts machines over prose</div>
+    <p>Before the spec existed, the design was pressure-tested by hand: eight adversarial scenarios, all resolved. A human review concluded that registration fencing (<span class="chip rule">E5</span>) was defense-in-depth — nice, but redundant. Then the fence toggles went into the spec, and within seconds of switching E5 off, TLC produced a trace no human had written:</p>
+    <p>A host acquires epoch <em>e</em> and stalls <em>before</em> rehydrating. Its lease expires; a successor takes <em>e+1</em>, seals, and writes. The stalled waker then finishes its replay — faithfully absorbing the successor's <em>e+1</em> writes into itself — serves briefly, idles out, and registers a snapshot stamped <em>epoch e</em> whose contents contain epoch-<em>e+1</em> data. The manifest forges its own ancestry. Nothing fails today; the poison waits inside PITR branching and garbage collection, one hop removed. And the gateway fence never fires, because <em>the slow waker never appends anything</em> — it only registers a snapshot. E5 is not defense-in-depth. On this path it is the only fence there is.</p>
+    <p>This became <span class="chip pt">PT-9</span>, "the slow waker," and the house rule it justifies: when prose and spec disagree, the spec wins, and the prose gets fixed — never the reverse without a TLC run proving it.</p>
+  </div>
+
+  <p>M3's last move closes the loop between model and reality: a <strong>deterministic simulation harness</strong> (<code>internal/dataplane/sim</code>) executes the spec's actions, at the spec's atomicity, against the <em>real</em> gateway, manifest, and object-store code — asserting every invariant after every step, over thousands of seeded random schedules. And crucially, it inherits the negative discipline: flip any of the same three fence switches off and the harness must reproduce the TLC counterexample against real code. Gate <span class="chip gate">C4</span>: 10,000 positive seeds clean; PT-1 reproduced at seed 0, the E6 stale-restore bug at seed 0, and PT-9's forged lineage at seed 1428.</p>
+
+  <h3>3.9 The gates</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Gate</th><th>Claim it forces to be true</th><th>Result</th></tr>
+    <tr><td><span class="chip gate">C1</span></td><td>Durability: SIGKILL + delete every app-local file → all 200 acked rows rebuilt byte-identical from the object store</td><td class="num">PASS · 200/200</td></tr>
+    <tr><td><span class="chip gate">C2</span></td><td>Fencing: stale append and stale registration rejected, manifest byte-identical, takeover seals monotone</td><td class="num">PASS</td></tr>
+    <tr><td><span class="chip gate">C3</span></td><td>PITR: branch serves exactly the past; parent stream untouched; "lost" suffix recoverable</td><td class="num">PASS</td></tr>
+    <tr><td><span class="chip gate">C4</span></td><td>Spec-as-oracle: 10,000 seeds clean; each disabled fence reproduces its TLC counterexample</td><td class="num">PASS</td></tr>
+  </table></div>
+
+  <div class="recap">
+    <div class="eyebrow">If you remember one thing</div>
+    <p>You cannot stop a paused machine from waking up confused; you can only make its confusion powerless. Krill does it with one integer — minted at every wake, stamped on every effect, checked by the storage itself — and then proves the arrangement with a model checker that has already out-reviewed the humans once.</p>
+  </div>
+
+  <div class="selfcheck">
+    <div class="eyebrow">Check yourself</div>
+    <details><summary>Why can't the guest stamp its own writes with an epoch?</summary><p>The guest is untrusted, agent-written code. A stamp applied by the thing being fenced is a promise, not a fence — a buggy or hostile guest could stamp anything. So the host tails the guest's WAL from outside the VM and applies the stamp itself; the guest doesn't even know epochs exist.</p></details>
+    <details><summary>A frozen app is resumed after three weeks. Walk the E6 sequence and say where a stale waker dies.</summary><p>Mint a fresh epoch; write the fenced takeover seal into the manifest by CAS — <em>here</em> a stale waker dies, because its seal loses the CAS against a manifest that has moved on; then reconcile the local /data disk against durable history (rebuild if diverged); only then does the guest run.</p></details>
+    <details><summary>PT-9's slow waker never sends a single WAL append. Why is it still dangerous, and which rule stops it?</summary><p>Its damage is a <em>snapshot registration</em>: a manifest stamped with the old epoch whose contents include the successor's newer data — forged lineage that later poisons restores and GC. The gateway append fence (E3) never gets a chance to fire. Registration fencing (E5) — rejecting a manifest stamped below the current epoch — is the only fence on that path.</p></details>
+    <details><summary>Why does CI deliberately break the protocol three ways and demand failure?</summary><p>A safety property that still "passes" with its enforcement disabled isn't being exercised by the model — the pass is vacuous. Requiring each disabled fence to produce a counterexample proves the model actually depends on every fence it claims to verify.</p></details>
+  </div>
+</section>
+
+<!-- ================= CH 4 ================= -->
+<section class="chapter" id="ch4">
+  <div class="ch-head">
+    <div class="ch-num">4</div>
+    <div class="ch-title-block">
+      <div class="eyebrow">Milestone M4 · designed, next to build</div>
+      <h2>The doorman</h2>
+    </div>
+  </div>
+
+  <div class="learn">
+    <div class="eyebrow">What you'll learn</div>
+    <ul>
+      <li>The difference between <em>authentication</em> (who are you?) and <em>authorization</em> (what may you do?) — and why apps here implement neither</li>
+      <li>The identity-aware proxy pattern: one front door for a million apps</li>
+      <li>Why "un-share" taking effect on the very next click falls out of the architecture for free</li>
+    </ul>
+  </div>
+
+  <p class="kicker">Unlike the previous chapters, this one describes a design, not shipped code — M4 is the next milestone. It earns its place in the book because it completes the founding analogy: a document isn't really a document until you can share it.</p>
+
+  <div class="mode concept">The concept</div>
+  <h3>4.1 Two questions that must never be confused</h3>
+
+  <p><strong>Authentication</strong> answers "who is this?" — proving the visitor is <code>friend@gmail.com</code>. <strong>Authorization</strong> answers "what may they do?" — checking that address against a guest list. Most apps bundle both inside themselves: a login page, a password table, role checks scattered through the code. For agent-written small software that bundle is a disaster three times over: every app reinvents security-critical code (written by an AI, at that), every user faces a new signup per app, and revoking someone means hoping each app's homemade logic works.</p>
+
+  <p>Krill's answer is the same stance it took with data: <em>take the dangerous job away from the app entirely</em>. Apps contain <strong>zero auth code</strong>. Both questions are answered before a request ever reaches the microVM.</p>
+
+  <div class="mode concept">The concept</div>
+  <h3>4.2 The identity-aware proxy</h3>
+
+  <p>Chapter 1 put a reverse proxy in front of every app to hold requests for sleeping apps. That choke point now earns a second job. Every request first meets the platform's edge, which authenticates the person (via Google OAuth — Krill never sees a password; it delegates "who are you" to an identity provider the visitor already trusts), then consults the app's share list, and only then forwards the request inward — wearing a name tag. This pattern has a name in industry — an <em>identity-aware proxy</em> — and it is what Google's IAP and Cloudflare Access sell to enterprises. Krill builds a small one and makes it the default for every app.</p>
+
+  <figure class="diagram">
+    <div class="drow" style="align-items: center;">
+      <div class="dbox rest">Visitor<small>clicks a share link</small></div>
+      <div class="darrow">HTTPS</div>
+      <div class="dbox edge">The doorman<small>1 · who are you? (Google OAuth)<br>2 · are you on the list? (ACL)</small></div>
+      <div class="darrow">X-App-User<br>+ signed JWT</div>
+      <div class="dbox guest">App microVM<small>reads the header, trusts it — no auth code</small></div>
+    </div>
+    <figcaption><b>D6 as a request flow.</b> The proxy strips any identity header a client tries to smuggle in, then injects its own. The JWT is <em>signed</em> (the app can verify it against the platform's key — defense in depth on top of network isolation) and <em>scoped per app</em> (its audience is this app alone, so a token minted for the vacation tracker can never be replayed against another app). Credentials never reach untrusted code.</figcaption>
+  </figure>
+
+  <div class="mode krill">In Krill</div>
+  <h3>4.3 Sharing on three planes</h3>
+
+  <p>The share sheet from the explainer distinguishes three separately grantable powers, because "can open the app" has quietly become three different trusts:</p>
+
+  <div class="tablewrap"><table>
+    <tr><th>Plane</th><th>Grants</th><th>Worth noticing</th></tr>
+    <tr><td><b>Use</b></td><td>Open the app, act through its UI</td><td>The default share; a domain share ("anyone at example.com") covers a whole team at once</td></tr>
+    <tr><td><b>Edit</b></td><td>Change the app itself — redeploy it</td><td>Increasingly means <em>their AI assistant</em> can change the app too; a real decision, not a checkbox</td></tr>
+    <tr><td><b>Data</b></td><td>Read the app's database beneath the UI</td><td>Being allowed to <em>use</em> an app doesn't mean reading everything others typed into it</td></tr>
+  </table></div>
+
+  <p>And the property that makes the whole design click: because <em>every</em> request passes the doorman, revocation is instant. Remove someone from the list and their very next click is refused — no passwords to rotate, nothing to redeploy, no app cooperation required. Compare that with the app-embedded world, where "remove access" means trusting each app's own session logic. It's the same architectural move as Chapter 3: put the check at a choke point the untrusted party can't route around. Epochs fence writes; the doorman fences people.</p>
+
+  <div class="mode krill">In Krill</div>
+  <h3>4.4 The gate, and the road past it</h3>
+
+  <p>M4's acceptance gate is refreshingly non-numeric: <em>a non-technical friend opens a shared link and uses an app with zero setup</em> — no signup, no install, just the Google account they already have. (A quiet side effect: if recipients keep coming back, the market-demand experiment this project explicitly declined to run starts running itself for free.)</p>
+
+  <p>A build-vs-buy note, recorded as ROADMAP decision #8: only the parts of this chapter that <em>are</em> the product get hand-written — the three-plane ACL, share links, the per-app token scoping, the marriage to the wake hold. The commodity plumbing around them (the OAuth dance, session cookies, JWT/JWKS handling) is assembled from proven components in the oauth2-proxy mold, because auth plumbing is the highest security-bug-density code in software and none of it is differentiated. The same posture holds platform-wide: the verified core from Chapter 3 has no off-the-shelf equivalent and stays; the perimeter — build isolation, guest egress fencing (kernel netfilter, so an agent-written app can't reach the cloud metadata service or send spam under the platform's IP), multi-host lease minting (etcd), even the ext4 tailer (retired by host-served block devices, someday) — leans on software with decades of adversarial hardening.</p>
+
+  <p>The design also extends cleanly past the milestone. Swapping "Google" for "the customer's identity provider" — Okta, Entra ID, a SAML endpoint — turns the doorman into a federation broker without touching sessions, ACLs, or the signed header: exactly the shape enterprises already buy. That, along with a second host (making PT-1 a live-fire exercise), lazy restore, and custom domains, sits in M5's dessert tray.</p>
+
+  <div class="recap">
+    <div class="eyebrow">If you remember one thing</div>
+    <p>M4 applies the book's one recurring idea to people instead of data: never ask the untrusted party to enforce anything. Identity is checked at a choke point every request must cross — so sharing is one click, and un-sharing is the very next one.</p>
+  </div>
+
+  <div class="selfcheck">
+    <div class="eyebrow">Check yourself</div>
+    <details><summary>Why is the identity JWT scoped to a single app?</summary><p>Without scoping, a token proving "this is friend@gmail.com" to one app could be captured and replayed against any other app — any app you can use could impersonate you everywhere. Binding the token's audience to one app makes it worthless anywhere else.</p></details>
+    <details><summary>Why does revocation take effect on the next click, with nothing redeployed?</summary><p>Because no app holds its own sessions or credentials. Access is evaluated fresh at the doorman on every request, so changing the list changes the answer immediately — the app never knew who was allowed in the first place.</p></details>
+    <details><summary>Which earlier design decisions does the doorman rhyme with?</summary><p>Chapter 0's stance (the guest is untrusted — so auth lives host-side, like WAL shipping), Chapter 1's router (the choke point already exists; auth is its second job), and Chapter 3's fencing (correctness enforced at a layer the stale or unauthorized party cannot bypass).</p></details>
+  </div>
+</section>
+
+<!-- ================= EPILOGUE ================= -->
+<section class="chapter" id="epilogue">
+  <div class="ch-head">
+    <div class="ch-num">∎</div>
+    <div class="ch-title-block">
+      <div class="eyebrow">Epilogue</div>
+      <h2>One idea, four times</h2>
+    </div>
+  </div>
+  <p>Strip the milestones to their skeletons and the same theorem appears four times. <strong>M1:</strong> don't keep machines alive — make their absence undetectable. <strong>M2:</strong> don't trust a deploy — watch it serve. <strong>M3:</strong> don't prevent stale writers — make staleness powerless, and let a model checker, not a reviewer, say when you're done. <strong>M4:</strong> don't let apps guard their own doors — put one guard where every path already passes.</p>
+  <p>In each case the system declines to rely on the component least able to be trusted — a sleeping VM's sense of time, a build's optimism, a zombie's self-awareness, an AI-written app's security code — and moves the responsibility to a small, host-side mechanism that checks a simple fact: a probe, a postcondition, an integer comparison, a list. That is the whole trick, and it is enough to let a million tiny apps sleep soundly.</p>
+  <p class="colophon" style="font-family: var(--sans); font-size: 0.8rem; color: var(--muted); margin-top: 2rem;">Sources: <code>ROADMAP.md</code>, <code>FencingProtocol.tla</code>, the pressure-test and architecture docs, and the gate results of 2026-07-23 (<code>m1-gates/</code>, <code>m2-gates/</code>, <code>m3-gates/</code>, <code>wake-bench/</code>). Where this book simplifies, those documents win — and where any prose disagrees with the spec, the spec wins.</p>
+</section>
+
+</div>

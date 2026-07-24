@@ -66,6 +66,22 @@ exists yet. The directory is **not yet a git repository** (fix in M1 step 0).
 7. **Documentation set moves together** — the tripwire in CLAUDE.md. Spec
    first, TLC re-run (positive + 3 negative configs), then both HTML docs,
    then republish to existing artifact URLs.
+8. **Commercial posture: keep the verified core, buy the perimeter
+   (2026-07-24, with Sam).** The charter is unchanged (resume value first,
+   market demand irrelevant) — this decision records which custom code we
+   would *defend* if the project ever commercializes, so milestone designs
+   stop drifting toward hand-rolling commodity plumbing. The hand-written
+   core (snapshot lifecycle, E1–E6, host-side WAL shipping, spec+sim
+   harness) has no off-the-shelf equivalent and a stronger verification
+   story than most proven software; everything commodity around it gets
+   proven components. Consequences: M4 assembles its auth plumbing from
+   proven parts, M5's "real lease service" becomes etcd, the ext4+jbd2
+   parser retires via a host-served block device, and two **today**-risks
+   (not at-scale risks) get closed before anyone untrusted touches the
+   platform: the builder's trust boundary and guest egress. Full map in
+   "Commercial posture — build vs. buy" below. Rejected: Litestream/LiteFS as data-plane replacements
+   (both trust the guest or treat a lease as correctness — violates the
+   untrusted-guest model and PT-3).
 
 ## M1-gating decisions — RESOLVED with Sam, 2026-07-23
 
@@ -228,11 +244,52 @@ non-technical friend opens a shared link and uses an app with zero setup.
 Side effect: if recipients keep returning, the rejected demand test runs
 itself for free.
 
+Build-vs-buy for this milestone (decision #8): hand-write only what *is*
+the product — the three-plane ACL, share links/revoke, per-app token
+scoping (JWT audience = one app), and the integration with the router's
+wake hold. The commodity plumbing (OAuth flow, session cookies, JWT/JWKS
+handling) comes from proven libraries/components in the
+oauth2-proxy/Pomerium mold — auth plumbing is the highest
+security-bug-density code there is, and none of it is differentiated.
+Dex (OIDC federation) or a WorkOS-class connector is the later path to
+enterprise SSO without touching sessions or the ACL. Scope note: the
+moment **edit** shares reach people Sam doesn't fully trust, their agents
+can push Dockerfiles — builder isolation (posture map below) becomes M4
+scope, not dessert. Same trigger for egress: **use** shares mean other
+people drive the apps and **edit** shares mean other people's agents
+write the code they run — the metadata-IP drop and port-25 block
+(today-risk #2 in the posture map) must land no later than the first
+share link.
+
 ### M5 — dessert tray (pick by joy, any order)
 
-Second host + real lease service (PT-1 live), UFFD lazy restore from network
-storage, content-addressed snapshot dedupe, `i3.metal` hour to close G4,
-VMGenID reseeding, web dashboard, custom domains.
+Second host + etcd-backed lease/epoch mint (PT-1 live; decision #8 — no
+homegrown lease service, and the fences stay at the storage layer per the
+spec: etcd replaces the *mint*, never the checks), host-served data disks
+(NBD/ublk/vhost-user-blk) to retire the `internal/ext4` jbd2 parser, UFFD
+lazy restore from network storage, content-addressed snapshot dedupe,
+`i3.metal` hour to close G4, VMGenID reseeding, web dashboard, custom
+domains.
+
+## Commercial posture — build vs. buy (recorded 2026-07-24)
+
+Decision #8 in one table. "Keep" = differentiated, verified, no
+off-the-shelf equivalent. "Buy" = commodity with decades of adversarial
+hardening we cannot replicate.
+
+| Component | Posture | Proven choice / rationale |
+|---|---|---|
+| VMM | already bought | Firecracker (runs AWS Lambda) |
+| App database | already bought | SQLite in-guest |
+| Object store / arbiter | already bought | GCS/S3 conditional PUTs are E4's substrate; never operate our own consensus |
+| Wake-on-request snapshot lifecycle | **keep** | The product. Knative cold-starts; firecracker-containerd has no snapshot/wake lifecycle; Modal/CodeSandbox/e2b all built theirs in-house |
+| Fencing semantics + WAL shipping (E1–E6, PrepareWake, shipper, gateway) | **keep** | No fit: Litestream trusts the guest, LiteFS treats a lease as correctness (PT-3). Defended by spec + 10k-seed sim, CI-checked negative configs |
+| M4 auth plumbing (OAuth, sessions, JWT/JWKS) | **buy** | oauth2-proxy/Pomerium shape; Caddy/Envoy viable as proxy substrate with the wake hold as middleware; Dex / WorkOS-class for SSO federation. Hand-write only ACL + per-app scoping |
+| Lease/epoch mint at multi-host | **buy (M5)** | etcd lease revisions — fencing tokens are natively its feature. Checks remain conditional PUTs at storage |
+| ext4+jbd2 read-only parser | **replace by rearchitecting (M5)** | No library reads a live guest-written ext4; a host-served block device (NBD/ublk/vhost-user-blk) sees every write and deletes the problem (EBS/Neon shape). Until then the parser stays, guarded by its non-vacuous fixtures |
+| Builder trust boundary | **buy — today-risk #1** | Server-side `docker build` of an untrusted context executes attacker instructions during build, on the host, outside any microVM, with a root daemon. Close with rootless BuildKit / kaniko / builds inside a throwaway Krill microVM (dogfood) **before anyone untrusted can deploy** — see the M4 scope note |
+| Guest egress controls | **buy — today-risk #2** | Nothing today stops an agent-written app from arbitrary outbound traffic: cloud-metadata SSRF (`169.254.169.254` steals the host's GCP credentials), port-25 spam, abuse under the platform's IP reputation. Kernel netfilter (nftables, proven) per tap: drop link-local/metadata destinations outright (one rule — land it in the next code session), default port-25 block + per-app rate limits **no later than the first M4 share link**, an auditing egress proxy later if commercial |
+| Registry catalog | keep for now | SQLite is fine single-host; Postgres if a control plane ever needs to scale |
 
 ## Resume-leverage backlog (parallel track, low effort, high value)
 
@@ -390,11 +447,21 @@ Session-level gotchas not recorded elsewhere:
   spec and both HTML docs are untouched (tripwire not tripped). The M2
   redeploy-resets-data contract is retired: `/data` survives redeploys.
   MCP server does not yet expose stream/restore (queued). GCP swept to
-  zero billing resources (M3 hardware run ≈ $0.20).
+  zero billing resources (M3 hardware run ≈ $0.20). **2026-07-24:** added
+  the learning textbook (`docs/krill-textbook.html`; artifact URL in
+  CLAUDE.md — derivative doc, not part of the tripwire) and recorded the
+  commercial build-vs-buy posture (decision #8 + the posture table
+  above). No code or protocol changes; spec and the three protocol
+  artifacts untouched.
 - **Next action:** M4 (the doorman: edge auth, share links, the
-  three-plane ACL) — or the queued side quests first: MCP stream/restore
-  tools, segment group-commit batching + GC past checkpoints (both noted
-  in the M3 results findings), the ~200 ms guest-userspace wake-tax
+  three-plane ACL), built per decision #8 — proven components for the
+  OAuth/session/JWT plumbing, hand-written ACL and per-app token scoping;
+  builder isolation and the egress baseline enter M4 scope once shares
+  reach untrusted people. Or the queued side quests first: the
+  guest-egress netfilter baseline (the metadata-IP drop is one rule —
+  cheapest risk-close on the board), MCP stream/restore tools,
+  segment group-commit batching + GC past checkpoints (both noted in the
+  M3 results findings), the ~200 ms guest-userspace wake-tax
   investigation, and the blog posts (three written in session history;
   the spec-as-test-oracle sim harness is a strong fifth candidate). Push
   commits to origin at session end (`git push`) so CI badges stay live.

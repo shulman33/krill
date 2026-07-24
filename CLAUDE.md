@@ -28,6 +28,7 @@ CLI, MCP server — passed B1–B4 on hardware.** Next: M3, the data plane.
 | `docs/small-software-cloud-pressure-test.html` | Source of the "Fencing the Sleeping Cloud" artifact: protocol rules, state machine, pressure tests PT-1–PT-9, interactive unit-economics model. |
 | `docs/sleeping-cloud-architecture.html` | Source of the architecture artifact: six diagrams (D1–D6) with fence pills marking where epoch checks are enforced. |
 | `docs/sleeping-cloud-explained.html` | Plain-English explainer for non-engineers — no protocol identifiers, but its analogies (deli ticket = epoch, notebook = per-app SQLite, journal = WAL) and headline numbers mirror the technical docs; update it when those change materially. |
+| `docs/krill-textbook.html` | "The Sleeping Cloud" — a distributed-systems-textbook read of M1–M4 for Sam's own learning (concepts first, then the implementation, diagrams, self-checks). Derivative of the canonical docs: it cites the same identifiers/numbers but is NOT part of the tripwire; if it drifts from spec/results, fix the textbook. |
 | `wake-path-benchmark.md` | 3-day hardware benchmark plan with pass/fail gates G1–G5. |
 | `wake-bench/` | Runnable scripts for that plan — two-tier cloud (GCP nested-virt first, EC2 `.metal` spot only on escalation); follow `wake-bench/README.md`. **Tier 1 ran 2026-07-23: G1/G2/G3/G5 pass, G4 escalates at N=50 only — decision: commit.** Results: `wake-bench/RESULTS-2026-07-23-nested.md` + raw data alongside it. |
 | `cmd/krilld/` + `internal/` | **The product (M1+M2+M3).** Go host agent: `registry` (SQLite catalog, /30 allocation, M3 epoch mint), `firecracker` (test-pinned API driver, optional data drive), `lifecycle` (state machine + single-flight wakes + janitor + crash reconcile + DEPLOYING claim + M3 DataPlane hooks), `router` (wake-on-request proxy, D2; M3 sync-ack hold), `network`/`rootfs` (taps + deterministic MACs / golden + rootfs disks + M3 data disks that survive redeploys), `builder` (tar context → docker build → `mkfs.ext4 -d` → generated init; mounts `/data`), `guestlog`, `admin` (loopback control API incl. deploy/logs/stream/restore), `host` (composition). `make test`, `make krilld-linux krill-linux fencetool-linux`. |
@@ -44,6 +45,7 @@ Published artifact URLs (private; update in place, never mint new URLs):
 - Pressure test / economics: https://claude.ai/code/artifact/17633d13-099a-402a-ae03-19f8b6adb7b6
 - Architecture: https://claude.ai/code/artifact/611f9b47-da7a-4b88-bf65-654f9339b4ec
 - Plain-English explainer: https://claude.ai/code/artifact/62a98e23-a56b-468c-91d4-eb7faf07a604
+- Textbook (M1–M4 learning doc): https://claude.ai/code/artifact/3eeb3011-e0a0-43c5-bfbc-2c7e15c1c026
 
 ## ⚠️ THE TRIPWIRE — the three protocol artifacts move together. Always.
 
