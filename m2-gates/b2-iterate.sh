@@ -2,6 +2,14 @@
 # B2 — iterate: redeploy replaces the app; snapshots never serve stale code;
 # app data resets on redeploy (asserted, because it's the documented M2
 # contract, not an accident).
+#
+# HISTORICAL (ran and PASSED 2026-07-23, pre-M3): the data-reset assertion
+# tested the ROOTFS disk, which was where app data lived in M2. M3 moved
+# durable data to /data (a second disk that redeploys preserve), so this
+# gate's data-reset step would fail against an M3 krilld FOR APPS THAT
+# WRITE TO /data — and that failure would be correct behavior. The
+# guestbook app here writes to its rootfs, so the gate still passes as
+# written; do not extend it to /data.
 set -euo pipefail
 cd "$(dirname "$0")"; source env.sh; source lib.sh
 
