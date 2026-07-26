@@ -19,8 +19,20 @@ type VMConfig struct {
 	// the guest): the app's durable data disk, tailed from the host by the
 	// M3 data plane. Also baked into snapshots.
 	DataPath string
+	// Extra are additional drives beyond rootfs and data, attached in order
+	// (/dev/vdb, /dev/vdc, ...). Builder VMs use them to take a build context
+	// in and hand a finished image out without either ever touching the host
+	// filesystem the builder can see.
+	Extra    []Drive
 	TapDev   string
 	GuestMAC string
+}
+
+// Drive is one additional virtio block device.
+type Drive struct {
+	ID       string
+	Path     string
+	ReadOnly bool
 }
 
 // Machine is one firecracker process plus its API socket.
@@ -89,13 +101,17 @@ func (m *Machine) Configure(ctx context.Context, cfg VMConfig) error {
 			"drive_id": "rootfs", "path_on_host": cfg.RootfsPath,
 			"is_root_device": true, "is_read_only": false}},
 	}
+	drives := cfg.Extra
 	if cfg.DataPath != "" {
+		drives = append([]Drive{{ID: "data", Path: cfg.DataPath}}, drives...)
+	}
+	for _, d := range drives {
 		steps = append(steps, struct {
 			path string
 			body any
-		}{"/drives/data", map[string]any{
-			"drive_id": "data", "path_on_host": cfg.DataPath,
-			"is_root_device": false, "is_read_only": false}})
+		}{"/drives/" + d.ID, map[string]any{
+			"drive_id": d.ID, "path_on_host": d.Path,
+			"is_root_device": false, "is_read_only": d.ReadOnly}})
 	}
 	steps = append(steps, []struct {
 		path string

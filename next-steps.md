@@ -1,0 +1,17 @@
+With the box live, here's the order I'd work in — it front-loads the things that are cheap now and become excuses-to-procrastinate later:
+
+1. First session on the box (~an hour): make it prove itself. Run the A-suite (m1-gates/) against the systemd-managed krilld. This isn't ceremony — it validates the runbook setup end-to-end, and it produces the project's first metal-tier results file (RESULTS-2026-07-XX-metal.md per the template convention). Every number so far carries the nested-virt asterisk; A1 on this box removes it. I'd genuinely expect the warm-wake distribution to tighten.
+
+2. Same session, while you're there: close G4. This is the sleeper item. G4 (the N=50 wake storm) is the only open benchmark gate in the project — it escalated on nested virt, and the tier rule says a verdict may only be recorded from metal. The ROADMAP's plan was "rent an i3.metal hour" — but you now own metal. Copy wake-bench/ over, run 30-storm.sh, and either G4 closes for free or you learn the real wakes/sec ceiling of one host — a number the economics model wants either way. Closing the last 2026-07-23 loose end on day one of the new box is a satisfying line in the ROADMAP.
+
+3. Buy the domain and set up wildcard DNS (30 minutes, but it gates everything after). M4's share links need something.yourdomain.com with a * A-record at the server IP. DNS propagation and domain-picking are exactly the kind of task that stalls a milestone if you discover it mid-build. Do it now, set --base-host accordingly, leave the router on loopback — nothing is exposed yet, the name just points at a closed door.
+
+4. Pre-register the M4 gates before writing doorman code. The discipline that made every previous milestone trustworthy: freeze the acceptance criteria first. One naming footgun to dodge — the natural next letter is D, which collides with the durability contract D1–D4, and those identifiers are load-bearing across the spec and docs. Name them F1–F4 (F for front door) and note the skipped letter in the gates file. Candidate gates: F1 unauthenticated request to a shared app → Google login → app serves with correct X-App-User; F2 revoke takes effect on the next request; F3 the three planes actually separate (a use-only user can't hit the data/edit surfaces); F4 the human gate — a non-technical friend opens a share link cold, zero setup.
+
+5. Then build M4 in the order the posture decided: proven plumbing first (r in the oauth2-proxy mold, TLS via Caddy or equivalent in front of therouter), then the hand-written product parts (three-plane ACL, share links, per-app token scoping), and un-loopbacking the router is the last commit, not the first — the
+doorman must exist before the door opens. Alongside that first exposure, tnbook becomes real: the moment strangers can drive apps, land the port-25block and rate limits before the first share link goes out.
+
+Rainy-day shelf (real value, no ordering constraint): the public README that leads with the CI model-checked badge and the results table — highest leverage-per-hour in the
+repo now that it's public; the PT-9 blog post; MCP stream/restore tools; avestigation, which is now more attractive because you have a permanent boxto iterate on — snapshot-while-hot experiments are exactly the kind of tinkering a $74/mo always-on machine makes cheap.
+
+If you only take one thing: do steps 1–2 in your first sitting. They're the only items where the value decays — every day the box runs unvalidated is a day you might be building M4 on a subtly misconfigured host, and G4 has been the ROADMAP's hmark day.

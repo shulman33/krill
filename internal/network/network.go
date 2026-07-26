@@ -48,6 +48,29 @@ func Derive(idx int) (AppNet, error) {
 	}, nil
 }
 
+// DeriveBuilder maps a builder slot to its network identity, in a range
+// deliberately separate from apps: 172.17.<idx>.0/30 with a tap named
+// krillb<idx>.
+//
+// The separate prefix is not cosmetic. The F6 ruleset distinguishes an app
+// guest from a builder guest by interface name, because a builder is the one
+// guest with any outbound access at all — and a rule that has to enumerate
+// which taps are builders would be wrong the moment a build starts.
+func DeriveBuilder(idx int) (AppNet, error) {
+	if idx < 0 || idx > 255 {
+		return AppNet{}, fmt.Errorf("builder slot %d out of range [0,255]", idx)
+	}
+	return AppNet{
+		SubnetIdx: idx,
+		TapName:   fmt.Sprintf("krillb%d", idx),
+		HostIP:    fmt.Sprintf("172.17.%d.1", idx),
+		GuestIP:   fmt.Sprintf("172.17.%d.2", idx),
+		HostCIDR:  fmt.Sprintf("172.17.%d.1/30", idx),
+		TapMAC:    fmt.Sprintf("02:FC:AC:11:%02X:01", idx),
+		GuestMAC:  fmt.Sprintf("06:00:AC:11:%02X:02", idx),
+	}, nil
+}
+
 // Runner executes a host network command. Indirection exists so tests can
 // record calls instead of needing root and Linux.
 type Runner interface {

@@ -61,12 +61,64 @@ type DeployConfig struct {
 	VerifyTimeout time.Duration
 }
 
+// Isolation says which deploys must build inside a throwaway microVM
+// rather than on the host (F5).
+type Isolation string
+
+const (
+	// IsolationOff: no builder VM. Deploys arriving over the network are
+	// REFUSED rather than built on the host — the fallback is the
+	// vulnerability, so there isn't one.
+	IsolationOff Isolation = "off"
+	// IsolationUntrusted (default): anything arriving through the doorman
+	// builds in a VM; the operator's own deploys use host docker.
+	IsolationUntrusted Isolation = "untrusted"
+	// IsolationAll: every build is isolated, including Sam's.
+	IsolationAll Isolation = "all"
+)
+
+// UntrustedHeader is how the doorman marks a deploy that came from the edit
+// share plane. It can only ever *raise* the isolation applied to a request:
+// the admin API is loopback-only, so forging it costs the forger the host
+// build path and gains them nothing.
+const UntrustedHeader = "X-Krill-Deploy-Untrusted"
+
+// DeployByHeader names who the doorman authorized, so a hostile build has a
+// name attached to it in the log.
+const DeployByHeader = "X-Krill-Deploy-By"
+
 type Server struct {
 	sup *lifecycle.Supervisor
 	bld ImageBuilder
-	dep DeployConfig
-	dur Durability
-	log *slog.Logger
+	// isolated builds inside a throwaway microVM. nil = no builder VM
+	// configured, which makes every untrusted deploy fail closed.
+	isolated  ImageBuilder
+	isolation Isolation
+	dep       DeployConfig
+	dur       Durability
+	log       *slog.Logger
+}
+
+// SetIsolatedBuilder wires in the microVM builder and the policy for when it
+// is used.
+func (s *Server) SetIsolatedBuilder(b ImageBuilder, mode Isolation) {
+	s.isolated, s.isolation = b, mode
+}
+
+// builderFor implements F5's central rule: a deploy that arrived over the
+// network never reaches host docker. If isolation is impossible, the deploy
+// is refused — never downgraded.
+func (s *Server) builderFor(r *http.Request) (ImageBuilder, bool, error) {
+	untrusted := r.Header.Get(UntrustedHeader) != ""
+	want := untrusted || s.isolation == IsolationAll
+	if !want {
+		return s.bld, false, nil
+	}
+	if s.isolated == nil {
+		return nil, true, fmt.Errorf("this deploy must build inside a microVM and no builder VM is " +
+			"configured (--build-vm-image/--build-vm-kernel); refusing to build it on the host")
+	}
+	return s.isolated, true, nil
 }
 
 func New(sup *lifecycle.Supervisor, bld ImageBuilder, dep DeployConfig, log *slog.Logger) *Server {
@@ -76,7 +128,7 @@ func New(sup *lifecycle.Supervisor, bld ImageBuilder, dep DeployConfig, log *slo
 	if dep.VerifyTimeout == 0 {
 		dep.VerifyTimeout = 60 * time.Second
 	}
-	return &Server{sup: sup, bld: bld, dep: dep, log: log}
+	return &Server{sup: sup, bld: bld, dep: dep, log: log, isolation: IsolationUntrusted}
 }
 
 type registerReq struct {
@@ -285,9 +337,13 @@ type deployResp struct {
 	WakeError string           `json:"wake_error,omitempty"`
 	Errors    []guestlog.Error `json:"errors,omitempty"`
 	SizeMB    int              `json:"size_mb"`
-	Warnings  []string         `json:"warnings,omitempty"`
-	BuildSecs float64          `json:"build_secs"`
-	CurlHint  string           `json:"curl_hint"`
+	// Isolated reports whether the build ran inside a throwaway microVM
+	// rather than on the host. Surfaced because "where did this build" is
+	// the whole of F5 and should never require reading a log to answer.
+	Isolated  bool     `json:"isolated"`
+	Warnings  []string `json:"warnings,omitempty"`
+	BuildSecs float64  `json:"build_secs"`
+	CurlHint  string   `json:"curl_hint"`
 }
 
 func (s *Server) deploy(w http.ResponseWriter, r *http.Request, name string) {
@@ -301,6 +357,21 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request, name string) {
 	guestPort := intParam(q.Get("guest_port"), 0)
 	sizeMB := intParam(q.Get("size_mb"), 0)
 	verify := q.Get("verify") != "false"
+
+	// Decide WHERE this builds before a byte of the context is unpacked, so a
+	// misconfiguration can never be discovered halfway through a hostile
+	// build that has already started running on the host.
+	bld, isolated, err := s.builderFor(r)
+	if err != nil {
+		s.log.Error("refusing an untrusted deploy: no isolated builder",
+			"app", name, "by", r.Header.Get(DeployByHeader))
+		fail(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	if isolated {
+		s.log.Warn("isolated build", "app", name, "by", r.Header.Get(DeployByHeader),
+			"untrusted", r.Header.Get(UntrustedHeader) != "")
+	}
 
 	ctxDir, err := os.MkdirTemp(s.dep.WorkDir, "ctx-"+name+"-")
 	if err != nil {
@@ -317,7 +388,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request, name string) {
 	start := time.Now()
 	bctx, cancel := context.WithTimeout(r.Context(), s.dep.BuildTimeout)
 	defer cancel()
-	res, err := s.bld.Build(bctx, name, ctxDir, sizeMB)
+	res, err := bld.Build(bctx, name, ctxDir, sizeMB)
 	if err != nil {
 		var be *builder.BuildError
 		if errors.As(err, &be) {
@@ -364,6 +435,7 @@ func (s *Server) deploy(w http.ResponseWriter, r *http.Request, name string) {
 
 	resp := deployResp{
 		Created:  created,
+		Isolated: isolated,
 		SizeMB:   res.SizeMB,
 		Warnings: res.Warnings,
 		URL:      s.appURL(meta.Name),

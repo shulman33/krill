@@ -89,6 +89,40 @@ type Config struct {
 	// RegistryBackupKeep is how many snapshots to retain.
 	RegistryBackupKeep int
 
+	// BuildVMImage and BuildVMKernel enable F5's isolated builder: a
+	// throwaway microVM that runs `docker build` on a submitted context.
+	// Build both once per host from m4-gates/builder-image/. With no image
+	// configured, deploys arriving over the network are REFUSED rather than
+	// built on the host — the fallback is the vulnerability.
+	BuildVMImage  string
+	BuildVMKernel string
+	// BuildIsolation: "off" | "untrusted" (default) | "all".
+	BuildIsolation string
+	// BuildVMMemMiB and BuildVMVCPUs size a builder VM. Builds want more of
+	// both than the apps they produce.
+	BuildVMMemMiB int
+	BuildVMVCPUs  int
+
+	// Egress installs the F6 nftables baseline at startup: app guests reach
+	// nothing outbound, builder VMs reach a registry and a resolver, nobody
+	// reaches another guest, the host, link-local or SMTP. On by default —
+	// the baseline must never be something a deployment forgets to turn on.
+	Egress bool
+	// AppEgress additionally lets ordinary apps out (still no SMTP, no local
+	// networks, rate-limited). Off, and expected to stay off.
+	AppEgress bool
+	// EgressRegistries are the container registries a builder VM may reach on
+	// 443; EgressResolvers the DNS servers it may query.
+	EgressRegistries string
+	EgressResolvers  string
+	// EgressBuildAllow widens the builder allowlist to package sources
+	// (distro mirrors, PyPI, npm). Empty by default: almost every real
+	// Dockerfile wants it, and it is a bigger surface than the registry
+	// alone, so it should be a decision rather than a discovery.
+	EgressBuildAllow string
+	// EgressRate bounds permitted guest egress in packets/second.
+	EgressRate int
+
 	// SnapshotBalloon toggles the balloon inflate/deflate cycle during
 	// freeze. Inflating reclaims guest free pages, shrinking the stored mem
 	// file — but the reclaim also evicts the guest's page cache, which the
@@ -125,6 +159,17 @@ func Default() Config {
 		RegistryBackupStore:    "", // resolved to the data-plane objstore
 		RegistryBackupInterval: 24 * time.Hour,
 		RegistryBackupKeep:     14,
+		BuildVMImage:           "",
+		BuildVMKernel:          "",
+		BuildIsolation:         "untrusted",
+		BuildVMMemMiB:          2048,
+		BuildVMVCPUs:           2,
+		Egress:                 true,
+		AppEgress:              false,
+		EgressRegistries:       "registry-1.docker.io,auth.docker.io,production.cloudflare.docker.com",
+		EgressResolvers:        "1.1.1.1,8.8.8.8",
+		EgressBuildAllow:       "",
+		EgressRate:             200,
 		SnapshotBalloon:        true,
 		BalloonSettle:          5 * time.Second,
 		DeflateSettle:          1 * time.Second,
@@ -153,6 +198,17 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.RegistryBackupStore, "registry-backup-store", c.RegistryBackupStore, "where to ship registry snapshots: file:///path or gs://bucket/prefix (empty = the data-plane objstore)")
 	fs.DurationVar(&c.RegistryBackupInterval, "registry-backup-interval", c.RegistryBackupInterval, "target age of the newest registry backup (0 = disable backups)")
 	fs.IntVar(&c.RegistryBackupKeep, "registry-backup-keep", c.RegistryBackupKeep, "how many registry backups to retain")
+	fs.StringVar(&c.BuildVMImage, "build-vm-image", c.BuildVMImage, "builder microVM golden rootfs (F5); empty = untrusted deploys are refused")
+	fs.StringVar(&c.BuildVMKernel, "build-vm-kernel", c.BuildVMKernel, "kernel for builder microVMs (needs cgroups/namespaces; empty = --kernel)")
+	fs.StringVar(&c.BuildIsolation, "build-isolation", c.BuildIsolation, "which deploys build in a microVM: off | untrusted | all")
+	fs.IntVar(&c.BuildVMMemMiB, "build-vm-mem", c.BuildVMMemMiB, "MiB of RAM for a builder microVM")
+	fs.IntVar(&c.BuildVMVCPUs, "build-vm-vcpus", c.BuildVMVCPUs, "vCPUs for a builder microVM")
+	fs.BoolVar(&c.Egress, "egress", c.Egress, "install the F6 nftables baseline (apps silent, builders reach a registry only)")
+	fs.BoolVar(&c.AppEgress, "app-egress", c.AppEgress, "let app guests reach the internet (still no SMTP, no local networks, rate-limited)")
+	fs.StringVar(&c.EgressRegistries, "egress-registries", c.EgressRegistries, "comma-separated registry hostnames builder VMs may reach on 443")
+	fs.StringVar(&c.EgressBuildAllow, "egress-build-allow", c.EgressBuildAllow, "extra hostnames builder VMs may reach on 443 (deb.debian.org,pypi.org,...) — a deliberate widening")
+	fs.StringVar(&c.EgressResolvers, "egress-resolvers", c.EgressResolvers, "comma-separated DNS servers builder VMs may query")
+	fs.IntVar(&c.EgressRate, "egress-rate", c.EgressRate, "packets/second ceiling on any permitted guest egress")
 	fs.BoolVar(&c.SnapshotBalloon, "snapshot-balloon", c.SnapshotBalloon, "balloon-reclaim guest RAM before snapshotting (smaller snapshots, slower first wake)")
 	fs.DurationVar(&c.BalloonSettle, "balloon-settle", c.BalloonSettle, "guest reclaim time after balloon inflate")
 	fs.DurationVar(&c.DeflateSettle, "deflate-settle", c.DeflateSettle, "wait after balloon deflate before pausing")

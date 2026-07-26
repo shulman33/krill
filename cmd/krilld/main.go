@@ -18,8 +18,10 @@ import (
 
 	"github.com/shulman33/krill/internal/admin"
 	"github.com/shulman33/krill/internal/builder"
+	"github.com/shulman33/krill/internal/buildvm"
 	"github.com/shulman33/krill/internal/config"
 	"github.com/shulman33/krill/internal/dataplane"
+	"github.com/shulman33/krill/internal/egress"
 	"github.com/shulman33/krill/internal/host"
 	"github.com/shulman33/krill/internal/lifecycle"
 	"github.com/shulman33/krill/internal/network"
@@ -57,7 +59,8 @@ func run() error {
 	defer reg.Close()
 
 	fs := rootfs.NewManager(cfg.DataDir)
-	be := host.New(cfg, network.NewManager(nil), fs, log)
+	netm := network.NewManager(nil)
+	be := host.New(cfg, netm, fs, log)
 	sup := lifecycle.New(reg, be, lifecycle.Config{
 		WakeTimeout: cfg.WakeTimeout,
 		// Freeze = balloon settle + deflate settle + writing guest RAM to
@@ -103,6 +106,39 @@ func run() error {
 	defer stop()
 	go sup.RunJanitor(ctx)
 
+	// The F6 baseline. It goes in before the router accepts anything, and
+	// before any builder VM could exist, because the first masquerade rule
+	// and the first drop rule have to arrive together — guests have no
+	// outbound today only by accident, and an accident stops protecting you
+	// the moment something needs the feature it was withholding.
+	if cfg.Egress {
+		eg := egress.New(egress.Config{
+			AppEgress:     cfg.AppEgress,
+			Registries:    splitList(cfg.EgressRegistries),
+			BuildAllow:    splitList(cfg.EgressBuildAllow),
+			Resolvers:     splitList(cfg.EgressResolvers),
+			RatePerSecond: cfg.EgressRate,
+		}, nil, nil)
+		if err := eg.Apply(ctx); err != nil {
+			// Loud, not fatal, for the same reason as the objstore preflight:
+			// krilld runs under Restart=always and must not crash-loop. The
+			// failure direction is safe — no masquerade means builds fail,
+			// not that guests get out.
+			log.Error("EGRESS BASELINE NOT INSTALLED — builder VMs cannot pull images, "+
+				"and any pre-existing rules are whatever was there before", "err", err)
+		} else {
+			log.Info("egress baseline on", "app_egress", cfg.AppEgress,
+				"registries", cfg.EgressRegistries, "build_allow", cfg.EgressBuildAllow,
+				"rate_pps", cfg.EgressRate)
+		}
+		// Registry addresses move; a build that starts after they do would
+		// otherwise fail against a stale set.
+		go eg.RunRefresh(ctx, 15*time.Minute)
+	} else {
+		log.Warn("egress baseline DISABLED (--egress=false): if anything has granted " +
+			"guests outbound, nothing here is stopping them")
+	}
+
 	// Registry backups: the epoch mint and the app catalog are the only state
 	// on this box that nothing else can reconstruct (E1). RAID1 does not
 	// survive the server.
@@ -131,6 +167,7 @@ func run() error {
 	adm.SetDurability(admin.Durability{
 		Spec: spec, Store: store, BackupSpec: backupSpec, Backups: backups,
 	})
+	setupIsolatedBuilder(cfg, adm, netm, log)
 	admSrv := &http.Server{Addr: cfg.AdminAddr, Handler: adm}
 	errCh := make(chan error, 2)
 	go func() { errCh <- serve(appSrv, "router", log) }()
@@ -154,6 +191,47 @@ func run() error {
 	_ = appSrv.Shutdown(shCtx)
 	_ = admSrv.Shutdown(shCtx)
 	return nil
+}
+
+// setupIsolatedBuilder wires F5's builder VM into the deploy path.
+//
+// The important line here is the one that does nothing: when no builder image
+// is configured, we do NOT fall back to host docker for untrusted deploys —
+// admin refuses them. A server-side `docker build` of someone else's
+// Dockerfile runs their instructions as root on the host, so the fallback
+// would be the exact vulnerability the milestone exists to close.
+func setupIsolatedBuilder(cfg config.Config, adm *admin.Server, netm *network.Manager, log *slog.Logger) {
+	mode := admin.Isolation(cfg.BuildIsolation)
+	switch mode {
+	case admin.IsolationOff, admin.IsolationUntrusted, admin.IsolationAll:
+	default:
+		log.Error("unknown --build-isolation, falling back to untrusted", "value", cfg.BuildIsolation)
+		mode = admin.IsolationUntrusted
+	}
+	if mode == admin.IsolationOff || cfg.BuildVMImage == "" {
+		adm.SetIsolatedBuilder(nil, mode)
+		log.Warn("NO ISOLATED BUILDER (--build-vm-image): deploys arriving through the doorman " +
+			"will be refused. Build one per m4-gates/builder-image/README.md.")
+		return
+	}
+	kernel := cfg.BuildVMKernel
+	if kernel == "" {
+		kernel = cfg.KernelPath
+	}
+	bvm := buildvm.New(buildvm.Config{
+		Image: cfg.BuildVMImage, Kernel: kernel,
+		FirecrackerBin: cfg.FirecrackerBin,
+		WorkDir:        filepath.Join(cfg.DataDir, "build"),
+		VCPUs:          cfg.BuildVMVCPUs, MemMiB: cfg.BuildVMMemMiB,
+		Timeout: cfg.BuildTimeout,
+	}, netm, log)
+	if err := bvm.Available(); err != nil {
+		adm.SetIsolatedBuilder(nil, mode)
+		log.Error("ISOLATED BUILDER MISCONFIGURED: untrusted deploys will be refused", "err", err)
+		return
+	}
+	adm.SetIsolatedBuilder(bvm, mode)
+	log.Info("isolated builder on", "mode", mode, "image", cfg.BuildVMImage, "kernel", kernel)
 }
 
 // setupBackups resolves where registry snapshots go and builds the manager.

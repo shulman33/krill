@@ -73,6 +73,12 @@ type Result struct {
 	tmpDir string
 }
 
+// NewResult returns an empty Result that owns tmpDir. It exists so an
+// alternative builder — internal/buildvm, which runs the build inside a
+// microVM — can hand back exactly the value the deploy path already consumes,
+// making the two interchangeable at the call site.
+func NewResult(tmpDir string) *Result { return &Result{tmpDir: tmpDir} }
+
 func (r *Result) Cleanup() {
 	if r.tmpDir != "" {
 		os.RemoveAll(r.tmpDir)
