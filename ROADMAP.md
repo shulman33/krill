@@ -121,6 +121,45 @@ exists yet. The directory is **not yet a git repository** (fix in M1 step 0).
    so the dangerous parts of hand-rolled sessions (signing, expiry, rotation,
    key management) never come into existence.
 
+10. **M4's three pre-code decisions (2026-07-26, with Sam).** Settled so the
+    first commit isn't blocked on taste:
+    **(a) The F4 demo app is a shared watchlist** — movies/shows/restaurants
+    to try, at `watchlist.krill.run` (routing is by first DNS label, so it is
+    a subdomain, never a path). Every item carries *added by whoever, when*,
+    which puts `X-App-User` on screen where a non-technical person can
+    confirm it's right — F1 demonstrated rather than asserted. Chosen over a
+    grocery list (higher repeat use, but works best with a housemate, and F4
+    explicitly wants a friend on a network that isn't Sam's) and a
+    split-the-bill tracker (does arithmetic people will check, so a usability
+    test would surface rounding bugs instead of doorman bugs). Must write
+    `/data/app.db` — the `guestbook` lesson — and **should be written by an
+    agent through the MCP server**, since "agent-written apps deploy in one
+    call" is the pitch and this makes the README honest. ⚠ This is real
+    unbudgeted work now inside M4: without it F4 has nothing to run against.
+    **(b) `krill share` ships in the existing `cmd/krill` binary**, talking to
+    the doorman on a second endpoint (default: admin port + 1, 9091 → 9092).
+    The krilld/doorman split is an implementation seam and the CLI is where
+    such seams get hidden; a second tool to share the app you just deployed
+    contradicts the product's one-line pitch. Precedent: `objstore-copy`
+    already bypasses the admin API. `krill share` talks *only* to the
+    doorman, which validates the app name against krilld itself (same lookup
+    its lazy-prune path already needs). ⚠ `krill apps` becomes the first
+    command fanning out to both services — the seam's one visible cost,
+    accepted knowingly.
+    **(c) Two lifetimes, not one — and they are deliberately far apart.**
+    Browser↔doorman **session**: opaque 256-bit id → server row, **30-day
+    sliding, 90-day absolute cap**. Doorman→guest **identity token**: signed,
+    `aud` = exactly one app, **~5 minutes, minted per request** (ed25519 is
+    ~50 µs; caching it would be optimizing the wrong thing). The reasoning is
+    that F2 changed what session lifetime is *for*: with revocation instant,
+    durable and restore-proof, lifetime is a hygiene control, not a security
+    control — short sessions are what you use to compensate for weak
+    revocation, and that compensation is no longer needed. The guest token
+    stays short for the opposite reason: the guest is the untrusted party
+    here, so a leaked token must die in minutes, and F3's replay test then
+    fails on both audience and expiry. The guest never sees the session
+    cookie.
+
 ## M1-gating decisions — RESOLVED with Sam, 2026-07-23
 
 1. **Name: Krill.** Repo `krill`, host-agent binary `krilld`. Sam rejected
