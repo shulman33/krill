@@ -202,6 +202,8 @@ func (s *Server) appRoute(w http.ResponseWriter, r *http.Request, rest string) {
 		s.logs(w, r, name)
 	case action == "stream" && r.Method == http.MethodGet:
 		s.stream(w, r, name)
+	case action == "data" && r.Method == http.MethodGet:
+		s.exportData(w, r, name)
 	case action == "restore" && r.Method == http.MethodPost:
 		s.restore(w, r, name)
 	default:
@@ -218,6 +220,23 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, name string) {
 		return
 	}
 	reply(w, http.StatusOK, m)
+}
+
+// exportData serves the app's SQLite database as one checkpointed file. It
+// is what the doorman's "data" share plane relays, so an ordinary person with
+// a data link can download the thing their app actually wrote — read out of
+// the guest's disk by the host, with no cooperation from the guest.
+func (s *Server) exportData(w http.ResponseWriter, r *http.Request, name string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	db, err := s.sup.ExportData(ctx, name)
+	if err != nil {
+		fail(w, statusFor(err), err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name+".db"))
+	w.Write(db)
 }
 
 // restore is PITR: {"at_lsn": N} or {"at_time": "RFC3339"} → branch the

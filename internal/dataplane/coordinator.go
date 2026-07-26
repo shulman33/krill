@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shulman33/krill/internal/registry"
+	"github.com/shulman33/krill/internal/sqlitewal"
 )
 
 // ControlPlane is the E1 mint: a strictly monotone per-app epoch counter in
@@ -270,4 +271,36 @@ func writeCursorFileAt(path string, c cursorFile) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// ExportDB materializes the app's SQLite database as a single self-consistent
+// file: the precise (journal-replayed) view of the data disk, with any
+// outstanding WAL frames replayed up to their last commit boundary.
+//
+// This is the "data" share plane's export, and the checkpointing is what
+// makes it usable rather than merely truthful. Handing someone a raw
+// app.db while the guest is mid-transaction gives them a file whose missing
+// half lives in a WAL they did not get; Replay cuts at a commit boundary, so
+// what comes out is exactly what SQLite's own checkpoint would have written.
+func (c *Coordinator) ExportDB(_ context.Context, app registry.App) ([]byte, error) {
+	src := &Ext4Source{ImagePath: c.Disks.DataDiskPath(app.Name), DBPath: c.DBPath}
+	db, err := src.DB(true)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s from %s's data disk: %w", c.DBPath, app.Name, err)
+	}
+	wal, err := src.WAL(true)
+	if err != nil || len(wal) == 0 {
+		return db, err
+	}
+	res, err := sqlitewal.Scan(wal, sqlitewal.Cursor{})
+	if err != nil || len(res.Frames) == 0 {
+		// A WAL we cannot parse is not a reason to refuse the export: the
+		// database file alone is still a valid, if older, snapshot.
+		return db, nil
+	}
+	out, err := sqlitewal.Replay(db, res.Header.PageSize, res.Frames)
+	if err != nil {
+		return db, nil
+	}
+	return out, nil
 }

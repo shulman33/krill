@@ -227,6 +227,13 @@ if [ -b /dev/vdb ]; then
   mkdir -p /data
   mount /dev/vdb /data 2>/dev/null || echo "krill-init: mounting /data failed" >&2
 fi
+# The M4 identity contract: the doorman signs a short-lived token naming the
+# caller, and hands the guest the ed25519 public key on the kernel command
+# line. Verify X-Krill-Token against this key and you may believe X-App-User;
+# skip it and you are trusting a header. Apps have no outbound network (F6),
+# which is exactly why the key arrives here rather than from a JWKS URL.
+KRILL_IDENTITY_PUBKEY="$(sed -n 's/.*krill_idkey=\([^ ]*\).*/\1/p' /proc/cmdline)"
+export KRILL_IDENTITY_PUBKEY
 export HOME="${HOME:-/root}"
 `)
 	for _, e := range cfg.Env {

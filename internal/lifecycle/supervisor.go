@@ -111,6 +111,9 @@ type DataPlane interface {
 	StreamStatus(ctx context.Context, name, stream string) (*dataplane.Manifest, error)
 	// PurgeApp removes the app's object-store data (deletion is total).
 	PurgeApp(ctx context.Context, name string) error
+	// ExportDB materializes the app's SQLite database as one consistent
+	// file — the "data" share plane's export.
+	ExportDB(ctx context.Context, app registry.App) ([]byte, error)
 }
 
 func (c Config) janitorTick() time.Duration {
@@ -719,6 +722,21 @@ func (s *Supervisor) SyncData(ctx context.Context, name string) error {
 		return nil
 	}
 	return s.dp.Sync(ctx, name)
+}
+
+// ExportData hands back the app's database as a single checkpointed file.
+// It does NOT quiesce the app: the export is the host's precise view at this
+// instant, cut at a commit boundary, which is the same guarantee a reader
+// attaching to the live database would get.
+func (s *Supervisor) ExportData(ctx context.Context, name string) ([]byte, error) {
+	if s.dp == nil {
+		return nil, errors.New("data plane disabled")
+	}
+	meta, err := s.reg.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	return s.dp.ExportDB(ctx, meta)
 }
 
 // StreamStatus returns the app's data-plane manifest (admin API).

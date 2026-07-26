@@ -45,6 +45,15 @@ type Router struct {
 	// before one byte reaches the client — so an ack can never outrun its
 	// durability. Read-only requests cost one WAL scan and no store I/O.
 	SyncAck bool
+	// RouteSuffixes pins which Host suffixes route, e.g. {"krill.run"}.
+	//
+	// Empty means any suffix routes, which is M1-M3 behavior and is what the
+	// gate suites depend on (they send krill.local at a daemon whose
+	// --base-host is krill.run, and that is correct — the suffix has never
+	// been part of routing). The doorman pins the suffix unconditionally
+	// upstream of here, so this is defense in depth for the loopback router:
+	// F3's requirement is met at the front door, and again here.
+	RouteSuffixes []string
 }
 
 func New(sup *lifecycle.Supervisor, log *slog.Logger) *Router {
@@ -56,7 +65,7 @@ func New(sup *lifecycle.Supervisor, log *slog.Logger) *Router {
 
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	name := appName(r.Host)
-	if name == "" {
+	if name == "" || !rt.suffixAllowed(r.Host) {
 		http.Error(w, "krill: no app in Host header (use <app>.<host>)", http.StatusNotFound)
 		return
 	}
@@ -131,6 +140,28 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"acquire_ms", acquireDur.Milliseconds(),
 			"proxy_ms", (total - acquireDur).Milliseconds())
 	}
+}
+
+// suffixAllowed applies the optional Host-suffix pin. With no suffixes
+// configured every Host with a valid app label routes, which is how M1-M3
+// behaved and what the gate suites still exercise.
+func (rt *Router) suffixAllowed(host string) bool {
+	if len(rt.RouteSuffixes) == 0 {
+		return true
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	for _, suffix := range rt.RouteSuffixes {
+		suffix = strings.ToLower(strings.TrimPrefix(suffix, "."))
+		// Exactly one label in front of the suffix: "<app>.<suffix>" routes,
+		// "<app>.<anything>.<suffix>" does not.
+		if rest, ok := strings.CutSuffix(host, "."+suffix); ok && !strings.Contains(rest, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 // appName extracts the first DNS label from a Host header value. Bare hosts

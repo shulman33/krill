@@ -14,8 +14,17 @@
 //	krill backup         snapshot the registry (the epoch mint) right now
 //	krill objstore-copy --from <spec> --to <spec>   move the record between stores
 //
+// and the sharing verbs, which talk to krill-doorman instead:
+//
+//	krill share <app> --plane use|data|edit    mint a capability link
+//	krill shares [app]                         the ACL: links, claims, revokes
+//	krill unshare <app> --user … | --share …   revoke, durably
+//	krill doorman                              front-door status
+//
 // The admin API address comes from --admin or KRILL_ADMIN (default
-// http://127.0.0.1:9091 — run on the host, or bring an SSH tunnel).
+// http://127.0.0.1:9091 — run on the host, or bring an SSH tunnel). The
+// doorman's address defaults to that port + 1; see cmd/krill/share.go for why
+// one binary talks to two services.
 package main
 
 import (
@@ -45,7 +54,8 @@ func main() {
 func run(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: krill <deploy|apps|status|logs|wake|freeze|delete|stream|restore|" +
-			"durability|backup|objstore-copy> [args]\n(see the package comment in cmd/krill)")
+			"durability|backup|objstore-copy|share|shares|unshare|doorman> [args]\n" +
+			"(see the package comment in cmd/krill)")
 	}
 	c := &client{admin: envOr("KRILL_ADMIN", "http://127.0.0.1:9091")}
 	cmd, rest := args[0], args[1:]
@@ -74,6 +84,14 @@ func run(args []string) error {
 		return c.backup(rest)
 	case "objstore-copy":
 		return c.objstoreCopy(rest)
+	case "share":
+		return c.share(rest)
+	case "shares":
+		return c.shares(rest)
+	case "unshare":
+		return c.unshare(rest)
+	case "doorman":
+		return c.doormanStatus(rest)
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}
@@ -288,7 +306,11 @@ func (c *client) apps(args []string) error {
 		fmt.Println("no apps registered")
 		return nil
 	}
-	fmt.Printf("%-24s %-13s %-9s %-6s %s\n", "NAME", "STATE", "SNAPSHOT", "RAM", "LAST WAKE")
+	// The one command that fans out to both services (decision #10b): krilld
+	// knows what is deployed, the doorman knows what is shared. A doorman that
+	// is absent or down costs the column, never the listing.
+	shares := c.shareCounts()
+	fmt.Printf("%-24s %-13s %-9s %-6s %-11s %s\n", "NAME", "STATE", "SNAPSHOT", "RAM", "LAST WAKE", "SHARED")
 	for _, a := range apps {
 		snap := "-"
 		if a.SnapshotValid {
@@ -298,7 +320,17 @@ func (c *client) apps(args []string) error {
 		if a.LastWakeMs > 0 {
 			wake = fmt.Sprintf("%d ms", a.LastWakeMs)
 		}
-		fmt.Printf("%-24s %-13s %-9s %-6d %s\n", a.Name, a.State, snap, a.MemMiB, wake)
+		shared := "?"
+		if shares != nil {
+			shared = "-"
+			if n := shares[a.Name]; n > 0 {
+				shared = fmt.Sprintf("%d link(s)", n)
+			}
+		}
+		fmt.Printf("%-24s %-13s %-9s %-6d %-11s %s\n", a.Name, a.State, snap, a.MemMiB, wake, shared)
+	}
+	if shares == nil {
+		fmt.Println("\n(SHARED is '?': krill-doorman is not answering — `krill doorman` says why)")
 	}
 	return nil
 }

@@ -221,6 +221,8 @@ func (d *syncDP) StreamStatus(context.Context, string, string) (*dataplane.Manif
 }
 func (d *syncDP) PurgeApp(context.Context, string) error { return nil }
 
+func (d *syncDP) ExportDB(context.Context, registry.App) ([]byte, error) { return nil, nil }
+
 // TestSyncAckHoldsResponses: with SyncAck on, every proxied response passes
 // through the durability hold; a failing hold means the client gets a 502,
 // never an unacknowledged-durability 200.

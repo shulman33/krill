@@ -77,6 +77,10 @@ func (f *fakeDataPlane) PurgeApp(ctx context.Context, name string) error {
 	return nil
 }
 
+func (f *fakeDataPlane) ExportDB(context.Context, registry.App) ([]byte, error) {
+	return nil, nil
+}
+
 func TestDataPlaneWakeFreezeOrdering(t *testing.T) {
 	be := newFakeBackend()
 	dp := &fakeDataPlane{}

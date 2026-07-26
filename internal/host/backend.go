@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/shulman33/krill/internal/config"
@@ -122,8 +124,42 @@ func (b *Backend) bootArgs(app registry.App, n network.AppNet) string {
 	// IP_PNP ignores ip= as an unknown parameter; an init that configured
 	// eth0 already just gets EEXIST from its `ip addr add`. Both are inert
 	// where they don't apply.
-	return fmt.Sprintf("%s krill_ip=%s/30 krill_gw=%s ip=%s::%s:255.255.255.252::eth0:off",
+	args := fmt.Sprintf("%s krill_ip=%s/30 krill_gw=%s ip=%s::%s:255.255.255.252::eth0:off",
 		base, n.GuestIP, n.HostIP, n.GuestIP, n.HostIP)
+	// The doorman's identity key rides the same channel, for the same
+	// reason: it is the one piece of trust a guest needs and cannot fetch.
+	// F6 leaves app guests with no outbound network at all, so a JWKS URL
+	// would be a hole cut through the baseline; an ed25519 public key is 44
+	// characters and fits here instead. Re-read per boot, so rotating the
+	// key is a wake rather than a redeploy.
+	if key := b.identityKey(); key != "" {
+		args += " krill_idkey=" + key
+	}
+	return args
+}
+
+// identityKey reads the doorman's published public key. A missing or
+// unreadable file is not fatal: apps that do not check the token keep
+// working, and apps that do will reject callers until it reappears — which
+// is the safe direction for a file the doorman rewrites at every start.
+func (b *Backend) identityKey() string {
+	if b.cfg.IdentityPubFile == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(b.cfg.IdentityPubFile)
+	if err != nil {
+		b.log.Warn("identity public key unreadable: guests will get no krill_idkey=",
+			"path", b.cfg.IdentityPubFile, "err", err)
+		return ""
+	}
+	key := strings.TrimSpace(string(raw))
+	// Anything with a space would silently become a second kernel argument.
+	if key == "" || strings.ContainsAny(key, " \t\n") {
+		b.log.Warn("identity public key looks malformed; not passing it to guests",
+			"path", b.cfg.IdentityPubFile)
+		return ""
+	}
+	return key
 }
 
 func (b *Backend) launch(ctx context.Context) func(app registry.App) (*firecracker.Machine, error) {

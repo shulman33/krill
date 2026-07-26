@@ -117,6 +117,10 @@ func run() error {
 	bld := builder.New(cfg.DockerBin, filepath.Join(cfg.DataDir, "build"))
 	rt := router.New(sup, log)
 	rt.SyncAck = cfg.DataPlane && cfg.SyncAck
+	rt.RouteSuffixes = splitList(cfg.RouteSuffixes)
+	if len(rt.RouteSuffixes) > 0 {
+		log.Info("router host-suffix pin on", "suffixes", rt.RouteSuffixes)
+	}
 	appSrv := &http.Server{Addr: cfg.ListenAddr, Handler: rt}
 	adm := admin.New(sup, bld, admin.DeployConfig{
 		WorkDir:      filepath.Join(cfg.DataDir, "build"),
@@ -132,7 +136,8 @@ func run() error {
 	go func() { errCh <- serve(appSrv, "router", log) }()
 	go func() { errCh <- serve(admSrv, "admin", log) }()
 	log.Info("krilld up", "router", cfg.ListenAddr, "admin", cfg.AdminAddr,
-		"data", cfg.DataDir, "idle_timeout", cfg.IdleTimeout.String())
+		"data", cfg.DataDir, "idle_timeout", cfg.IdleTimeout.String(),
+		"identity_key", cfg.IdentityPubFile != "")
 
 	select {
 	case <-ctx.Done():
@@ -199,6 +204,16 @@ func describe(store objstore.Store, spec string) string {
 		return d.Describe()
 	}
 	return spec
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func serve(s *http.Server, name string, log *slog.Logger) error {

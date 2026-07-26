@@ -25,6 +25,21 @@ type Config struct {
 	// FirecrackerBin is the firecracker binary to spawn per microVM.
 	FirecrackerBin string
 
+	// IdentityPubFile is the doorman's ed25519 public key (base64url, one
+	// line). krilld appends it to every guest's kernel command line as
+	// krill_idkey=, and the generated init exports it as
+	// KRILL_IDENTITY_PUBKEY — which is how an app with NO outbound network
+	// (the F6 baseline) can still verify the X-Krill-Token the doorman
+	// minted for its caller. Empty = no injection (M1-M3 behavior).
+	IdentityPubFile string
+
+	// RouteSuffixes pins which Host suffixes the router will serve, as a
+	// comma-separated list. Empty = accept any suffix, which is M1-M3
+	// behavior and is what the gate suites rely on (they send krill.local).
+	// The doorman pins the suffix unconditionally; this is defense in depth
+	// for the loopback router behind it.
+	RouteSuffixes string
+
 	// BaseHost is the domain apps hang off: app "counter" serves at
 	// counter.<BaseHost> through the router. Point a wildcard DNS record (or
 	// /etc/hosts entries) at the router and printed URLs become clickable.
@@ -89,21 +104,23 @@ type Config struct {
 
 func Default() Config {
 	return Config{
-		DataDir:        "/srv/krill",
-		ListenAddr:     ":8080",
-		AdminAddr:      "127.0.0.1:9091",
-		KernelPath:     "/srv/fc/vmlinux",
-		FirecrackerBin: "firecracker",
-		BaseHost:       "krill.local",
-		DockerBin:      "docker",
-		BuildTimeout:   10 * time.Minute,
-		IdleTimeout:    60 * time.Second,
-		WakeTimeout:    30 * time.Second,
-		Objstore:       "", // resolved to file://<DataDir>/objstore at startup
-		DataPlane:      true,
-		SyncAck:        true,
-		CellGen:        1,
-		DataDiskMB:     256,
+		DataDir:         "/srv/krill",
+		ListenAddr:      ":8080",
+		AdminAddr:       "127.0.0.1:9091",
+		KernelPath:      "/srv/fc/vmlinux",
+		FirecrackerBin:  "firecracker",
+		BaseHost:        "krill.local",
+		IdentityPubFile: "",
+		RouteSuffixes:   "",
+		DockerBin:       "docker",
+		BuildTimeout:    10 * time.Minute,
+		IdleTimeout:     60 * time.Second,
+		WakeTimeout:     30 * time.Second,
+		Objstore:        "", // resolved to file://<DataDir>/objstore at startup
+		DataPlane:       true,
+		SyncAck:         true,
+		CellGen:         1,
+		DataDiskMB:      256,
 
 		RegistryBackupStore:    "", // resolved to the data-plane objstore
 		RegistryBackupInterval: 24 * time.Hour,
@@ -122,6 +139,8 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.KernelPath, "kernel", c.KernelPath, "default guest kernel (uncompressed vmlinux)")
 	fs.StringVar(&c.FirecrackerBin, "firecracker", c.FirecrackerBin, "firecracker binary")
 	fs.StringVar(&c.BaseHost, "base-host", c.BaseHost, "domain apps serve under (<app>.<base-host>)")
+	fs.StringVar(&c.IdentityPubFile, "identity-pubkey-file", c.IdentityPubFile, "doorman ed25519 public key to hand guests on the kernel command line (empty = none)")
+	fs.StringVar(&c.RouteSuffixes, "route-suffixes", c.RouteSuffixes, "comma-separated Host suffixes the router will serve (empty = any)")
 	fs.StringVar(&c.DockerBin, "docker", c.DockerBin, "docker binary for deploy builds")
 	fs.DurationVar(&c.BuildTimeout, "build-timeout", c.BuildTimeout, "max time for one deploy build")
 	fs.DurationVar(&c.IdleTimeout, "idle-timeout", c.IdleTimeout, "idle time before an ACTIVE app is frozen")
