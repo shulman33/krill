@@ -10,9 +10,19 @@
 //   logs        serial tail + structured runtime errors (the self-heal loop)
 //   apps        list apps and lifecycle states
 //   delete_app  remove an app entirely
+//   share       mint a capability link for one app and one plane (M4)
+//   shares      the ACL: who has access, via which link, and what was revoked
+//   unshare     revoke a person or a link, durably
 //
-// Config: KRILL_ADMIN (default http://127.0.0.1:9091) — krilld's admin API,
-// loopback-only, so run this on the host or bring an SSH tunnel.
+// Config: KRILL_ADMIN (default http://127.0.0.1:9091) — krilld's admin API —
+// and KRILL_DOORMAN (default: that port + 1) for the sharing tools, which
+// talk to krill-doorman rather than krilld. Both are loopback-only, so run
+// this on the host or bring an SSH tunnel that forwards both ports.
+//
+// The sharing tools exist here for the same reason `krill share` lives in the
+// existing CLI (ROADMAP decision #10b): the krilld/doorman split is an
+// implementation seam, and "agent-written apps deploy in one call and share
+// like a Google Doc" is one sentence, not two tools.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -22,6 +32,12 @@ import { existsSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 
 const ADMIN = process.env.KRILL_ADMIN ?? "http://127.0.0.1:9091";
+
+/** The doorman's control API: KRILL_DOORMAN, or the admin port + 1. */
+const DOORMAN = process.env.KRILL_DOORMAN ?? (() => {
+  const m = /^(https?:\/\/[^:]+):(\d+)$/.exec(ADMIN);
+  return m ? `${m[1]}:${Number(m[2]) + 1}` : "http://127.0.0.1:9092";
+})();
 const DEPLOY_TIMEOUT_MS = 15 * 60 * 1000;
 
 interface GuestError {
@@ -234,6 +250,116 @@ server.registerTool(
   }
 );
 
+server.registerTool(
+  "share",
+  {
+    description:
+      "Create a share link for an app: an unguessable URL that is itself the grant. " +
+      "The recipient opens it, signs in with Google, and is bound to the app's ACL — " +
+      "you never need their address in advance. The link is returned ONCE (only its " +
+      "hash is stored). Planes: use = send requests to the app, data = read/export " +
+      "its /data, edit = replace its code (edit implies data implies use).",
+    inputSchema: {
+      app: z.string().describe("app name"),
+      plane: z.enum(["use", "data", "edit"]).default("use").describe("what the link grants"),
+      label: z.string().optional().describe("a note about who this link is for"),
+      expires_in: z.string().optional().describe('Go duration, e.g. "72h"; omit for never'),
+      max_claims: z.number().optional().describe("stop accepting new people after N claim it"),
+    },
+  },
+  async ({ app, plane, label, expires_in, max_claims }) => {
+    const resp = await fetch(`${DOORMAN}/v1/shares`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        app, plane, label: label ?? "", expires_in: expires_in ?? "",
+        max_claims: max_claims ?? 0, created_by: "mcp",
+      }),
+      signal: AbortSignal.timeout(30_000),
+    }).catch((e) => e as Error);
+    if (resp instanceof Error) {
+      return text(`cannot reach krill-doorman at ${DOORMAN}: ${resp.message}`, true);
+    }
+    if (!resp.ok) {
+      return text(`share failed: ${resp.status} ${await resp.text()}`, true);
+    }
+    const body = (await resp.json()) as { share: { id: string; plane: string }; link: string };
+    return text(
+      `${body.link}\n\n` +
+        `share ${body.share.id} on ${app} (${body.share.plane} plane).\n` +
+        `Send that link to whoever should have access — it is shown once.\n` +
+        `Revoke with: unshare {"app":"${app}","share":"${body.share.id}"}`
+    );
+  }
+);
+
+server.registerTool(
+  "shares",
+  {
+    description:
+      "Show the ACL: live share links and who has claimed them, per app or across all apps.",
+    inputSchema: { app: z.string().optional().describe("limit to one app") },
+  },
+  async ({ app }) => {
+    const q = app ? `?app=${encodeURIComponent(app)}` : "";
+    const [shares, grants] = await Promise.all([
+      fetch(`${DOORMAN}/v1/shares${q}`, { signal: AbortSignal.timeout(30_000) }),
+      fetch(`${DOORMAN}/v1/grants${q}`, { signal: AbortSignal.timeout(30_000) }),
+    ]).catch((e) => [e as Error, e as Error] as const);
+    if (shares instanceof Error) {
+      return text(`cannot reach krill-doorman at ${DOORMAN}: ${shares.message}`, true);
+    }
+    if (!shares.ok) return text(`shares failed: ${shares.status}`, true);
+    return text(
+      `links:\n${await shares.text()}\n\ngrants:\n${
+        grants instanceof Error || !grants.ok ? "(unavailable)" : await grants.text()
+      }`
+    );
+  }
+);
+
+server.registerTool(
+  "unshare",
+  {
+    description:
+      "Revoke access. Give `user` to cut off one person, or `share` to kill a link and " +
+      "everyone who claimed it. Takes effect on the very next request — no restart, no " +
+      "waiting out a session — and is durable at the object store before this returns, " +
+      "so no restore can undo it. An error here means NOTHING was revoked.",
+    inputSchema: {
+      app: z.string().describe("app name"),
+      user: z.string().optional().describe("email to revoke"),
+      share: z.string().optional().describe("share id to revoke (sh_...)"),
+      reason: z.string().optional(),
+    },
+  },
+  async ({ app, user, share, reason }) => {
+    const body = share
+      ? { kind: "share", share, by: "mcp", reason: reason ?? "" }
+      : { kind: "identity", app, email: user, by: "mcp", reason: reason ?? "" };
+    if (!share && !user) {
+      return text("give either `user` (an email) or `share` (a share id)", true);
+    }
+    const resp = await fetch(`${DOORMAN}/v1/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    }).catch((e) => e as Error);
+    if (resp instanceof Error) {
+      return text(`NOTHING WAS REVOKED — cannot reach krill-doorman: ${resp.message}`, true);
+    }
+    if (!resp.ok) {
+      return text(`NOTHING WAS REVOKED: ${resp.status} ${await resp.text()}`, true);
+    }
+    const rv = (await resp.json()) as { id: string; grants?: string[] };
+    return text(
+      `revoked (${rv.id}), ${rv.grants?.length ?? 0} grant(s) cut off.\n` +
+        `In force on the next request, and durable at the object store.`
+    );
+  }
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`krill-mcp on stdio (admin: ${ADMIN})`);
+console.error(`krill-mcp on stdio (admin: ${ADMIN}, doorman: ${DOORMAN})`);

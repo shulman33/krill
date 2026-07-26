@@ -160,6 +160,47 @@ exists yet. The directory is **not yet a git repository** (fix in M1 step 0).
     fails on both audience and expiry. The guest never sees the session
     cookie.
 
+11. **M4's implementation decisions (2026-07-26, made while building).**
+    Recorded because each was a fork in the road, not a detail, and a future
+    session would otherwise have to re-derive them:
+    **(a) Per-app session cookies over a master session on `auth.krill.run`,
+    not one domain-wide cookie.** A request proxied to a guest carries its
+    `Cookie` header, and guests run agent-written code the platform does not
+    trust — so a `.krill.run` session cookie would be a platform-wide
+    session-theft primitive handed to every app. The master session is
+    host-only on the auth host and never leaves it; each app host gets its own
+    opaque session, minted through a single-use handoff code. Cost: one extra
+    redirect on the first visit to each app. Caddy also strips the app cookie
+    on the way to the guest — belt and braces.
+    **(b) The identity token's public key reaches guests on the KERNEL
+    COMMAND LINE (`krill_idkey=`), not from a JWKS URL.** F6 leaves app guests
+    with no outbound network at all, so a JWKS fetch would require cutting a
+    hole through the baseline for every app. An ed25519 public key is 44
+    base64 characters and fits where the network contract already travels.
+    Rotation is a wake, not a redeploy. (This is also why the token is ed25519
+    rather than RSA.)
+    **(c) A revocation tombstone names the grant IDs it kills.** One mechanism,
+    three behaviors that all had to hold at once: restoring an older database
+    cannot resurrect access (the IDs are stable and still named); a revoked
+    person cannot re-admit themselves by re-opening the link they were sent
+    (re-claiming updates the *same* grant row); and an operator can still
+    deliberately re-admit someone with a fresh link (new grant, no tombstone) —
+    which is a new grant, not an undone revoke.
+    **(d) There is no host-build fallback.** When no builder VM is configured,
+    a deploy arriving through the doorman is REFUSED, not built on the host.
+    The fallback is the vulnerability, so it does not exist. `--build-isolation`
+    is `off | untrusted | all`; `untrusted` is the default and `all` isolates
+    Sam's deploys too.
+    **(e) `--egress-build-allow`, a tension F6 does not resolve on its own.**
+    "Builder VMs reach the registry and nothing else" is the right posture,
+    and almost every real Dockerfile also runs `apt-get` or `pip install`
+    (`m2-gates/examples/guestbook` does; `m3-gates/examples/ledger` does not).
+    So the builder allowlist is two lists feeding one nft set: container
+    registries, and package sources the operator has explicitly chosen. Empty
+    by default. A named allowlist is still not "general internet access", but
+    it is a bigger surface than the registry alone, and it should be a
+    decision rather than a discovery.
+
 ## M1-gating decisions — RESOLVED with Sam, 2026-07-23
 
 1. **Name: Krill.** Repo `krill`, host-agent binary `krilld`. Sam rejected
@@ -321,7 +362,23 @@ Rules E1–E6 as code, built and green under `-race`:
 Gates: `m3-gates/GATES.md` was pre-registered before any code; all four
 passed (see the heading above and the results file).
 
-### M4 — the doorman (~3–4 weeks; gates frozen 2026-07-26 in `m4-gates/GATES.md`)
+### M4 — the doorman — 🔨 BUILT 2026-07-26, NOT YET GATED
+
+**Every component exists and the whole tree is green under `go test -race
+./...`; not one of F1–F7 has been run on hardware.** That distinction is the
+whole point of pre-registering gates, so it is stated first: M4 is not done.
+
+What exists: `internal/doorman` + `cmd/krill-doorman` (Google OIDC, per-app
+sessions, the three-plane ACL, share links, ed25519 identity tokens,
+restore-proof revocation), `internal/egress` (F6's nftables baseline),
+`internal/buildvm` + `m4-gates/builder-image/` (F5's throwaway build VM),
+`krill share/shares/unshare/doorman` and the matching MCP tools, the
+`watchlist` (F4) and `hostile` (F5) examples, runnable gate scripts, and
+`SERVER-SETUP.md` Phase 9 with `deploy/Caddyfile`.
+
+*(The original scope note follows; it is unchanged and still governs.)*
+
+#### Original scope note (~3–4 weeks; gates frozen 2026-07-26 in `m4-gates/GATES.md`)
 
 ⚠ **Scope grew on 2026-07-26, with Sam, and the estimate grew with it.** The
 "~1–2 weeks" below was the doorman alone. M4 now carries **three** theses —
@@ -691,39 +748,103 @@ Session-level gotchas not recorded elsewhere:
   `krill.local` correctly. That same gap is an M4 requirement: **the
   doorman must pin the host suffix**, a natural F3 ingredient. The
   daemon default stays `krill.local` (right for a box with no DNS).
-- **Next action:** M4 (the doorman: edge auth, share links, the
-  three-plane ACL), built per decision #8 — proven components for the
-  OAuth/session/JWT plumbing, hand-written ACL and per-app token scoping;
-  builder isolation and the egress baseline enter M4 scope once shares
-  reach untrusted people — **and as of 2026-07-26 they do, by decision:
-  see the scope note on M4 above.** Its infrastructure prerequisites are
-  all closed (Phase 7 durability, Phase 8 DNS + ACME token) and **the
-  gates are frozen: `m4-gates/GATES.md`, F1–F7, written before any M4
-  code exists.** F1 identity at the edge (stranger → Google → correct,
-  verifiable `X-App-User`); F2 revoke on the very next request, for both a
-  claimed identity and a link, durable across restart **and across total
-  local-state loss — amended 2026-07-26 (a tightening, still before any M4
-  code; see the Amendments table in the gates file), because a revoke a
-  recovery can undo is not a revoke**; F3 the three
-  planes separate under real requests, plus per-app token audience and
-  **host-suffix pinning** (today `router.appName` accepts any suffix);
-  F4 the human gate; F5 a hostile Dockerfile stays inside the builder
-  microVM; F6 the egress baseline (apps silent, builders reach only a
-  registry); F7 exposure — wildcard TLS, and the admin API still
-  unreachable afterwards. **Ordering rule, this milestone's PT-3:**
-  F1–F3, F5, F6 are all provable through the tunnel before anything is
-  exposed; F4 and F7 are the only gates needing the public listener and
-  run last. A green F4 obtained by exposing the router early is a failed
-  milestone, not an early one. So the next code step is the doorman
-  itself (proven components for OAuth/session/JWT, hand-written ACL +
-  share links + per-app scoping). Or the queued side quests
-  first: the
-  guest-egress netfilter baseline (the metadata-IP drop is one rule —
-  cheapest risk-close on the board), MCP stream/restore tools,
-  segment group-commit batching + GC past checkpoints (both noted in the
-  M3 results findings), and the blog posts (three written in session history;
-  the spec-as-test-oracle sim harness is a strong fifth candidate). Push
-  commits to origin at session end (`git push`) so CI badges stay live.
+- **2026-07-26 (M4 build session): THE DOORMAN IS BUILT. NO F-GATE HAS RUN.**
+  Every component of M4 exists, `go vet ./...` and `go test -race ./...` are
+  green, and all four binaries cross-compile for linux/amd64. Nothing has
+  touched the production box, and F1–F7 are all outstanding. The tripwire was
+  **not** tripped: M4 changes no epoch rule, so `FencingProtocol.tla` and the
+  three protocol artifacts are untouched, exactly as the gates file predicted.
+  What landed, and where the load-bearing reasoning lives:
+  **`internal/doorman` + `cmd/krill-doorman`** — an unprivileged process
+  behind Caddy's `forward_auth`. Only a 200 from it lets a request reach
+  krilld's router, which is the only thing that can wake an app; F3's "a
+  fence that bills is still a fence that failed" is therefore structural
+  rather than careful. Hand-written per decision #8: the ACL, share links +
+  claim, per-app token scoping, revoke. Bought: `x/oauth2` +
+  `coreos/go-oidc` (the first non-SQLite dependencies this repo has taken).
+  **Revocation is the piece worth reading first.** Tombstones live in an
+  append-only object-store log, are written BEFORE a revoke is acked (D1's
+  rule applied to auth), and are replayed at every start — so the doorman's
+  own snapshot is a checkpoint and the log is the delta, which is M3's
+  restore path wearing different clothes. Each tombstone names the grant IDs
+  it kills (decision #11c). `krill unshare` returns an error, and revokes
+  nothing, when the object store is unreachable.
+  **`internal/egress`** — F6's baseline as one nftables table applied in a
+  single transaction (applied rule-by-rule there is a window where masquerade
+  exists and the drops do not, and that window is an unrestricted guest).
+  **`internal/buildvm` + `m4-gates/builder-image/`** — F5's throwaway build
+  VM: context in on a read-only disk, the app's golden image out on the disk
+  the build populates, teardown on a `defer`, timeout on the HOST's clock.
+  **CLI + MCP** — `krill share/shares/unshare/doorman` on port 9092 and the
+  same three as MCP tools; `krill apps` now fans out to both services.
+  **Examples** — `watchlist` (F4's app; verifies the identity token instead
+  of trusting the header, writes `/data/app.db`) and `hostile` (F5's
+  adversary, which must build successfully or its probes never run).
+  **What was actually verified, and how:** the doorman's own tests rehearse
+  F1–F3 against a fake provider, including the full revoke → snapshot →
+  destroy-the-database → restore → still-403 sequence F2 was tightened to
+  require; `internal/admin`'s tests assert from both sides that a
+  network-arriving deploy never reaches host docker; `internal/egress` asserts
+  rule *ordering*, not just presence (a prohibition after an accept is a dead
+  line); and the watchlist's pure-Python ed25519 verifier was cross-checked
+  against Go's — a real minted token verifies, and wrong audience, wrong key,
+  expired and tampered all fail. None of that is a gate result.
+  **Pivots from the plan, all recorded as decision #11:** per-app session
+  cookies rather than one domain-wide cookie (a guest sees the `Cookie` header
+  of requests proxied to it); the identity public key travelling on the kernel
+  command line rather than via JWKS (F6 leaves apps with no egress at all);
+  no host-build fallback for untrusted deploys; and `--egress-build-allow`,
+  which makes explicit a tension F6 does not resolve — "the registry and
+  nothing else" is right, and almost every real Dockerfile also runs
+  `apt-get` or `pip install`.
+  **Two known unknowns from the previous session, one closed one still open:**
+  Caddy's `forward_auth` DOES cover the whole flow with no custom module —
+  `/_krill/*` is a separate `handle` block for the callback and share links,
+  and a non-2xx from the auth server is returned to the browser verbatim, so
+  the redirect to Google works from inside `forward_auth` (`deploy/Caddyfile`).
+  Google's OAuth verification status is **still unverified** and is the one
+  thing that could fail F4 on a warning interstitial; the intended mitigation
+  (request only `openid`/`email`/`profile`) is written into Phase 9 step 1 as
+  a ⚠, and it must be confirmed before building the client, not the week F4
+  runs.
+  **The new open risk is the builder kernel.** A container build needs cgroup
+  v2 and namespaces, and the Firecracker CI kernel is built for minimal app
+  guests. The build script uses `buildkitd --oci-worker-snapshotter=native`
+  specifically so overlayfs is not also required, and the failure arrives in
+  the deploy response with the `buildkitd` tail attached — but whether the CI
+  kernel suffices is untested. `m4-gates/builder-image/README.md` has the
+  escalation path.
+- **Next action: RUN THE GATES, in the order the ordering rule fixes.** Nothing
+  else in M4 is worth doing first, and a gate skipped now is a gate that never
+  runs. On the box, per `m4-gates/README.md` (the tunnel needs 9090 and 9092
+  as well as 8080/9091):
+  1. `SERVER-SETUP.md` **Phase 9 steps 1–4**: the Google client (⚠ confirm the
+     verification question first), the `krill-doorman` user and unit, krilld's
+     three new flags, and `m4-gates/builder-image/build.sh`.
+  2. `m4-gates/00-setup.sh` — it refuses when a result would be meaningless,
+     notably when the doorman has no object store (F2 could not pass).
+  3. **F1, F2, F3, F5, F6 through the tunnel, with 80/443 still closed.**
+     F1 needs one human sign-in and one cookie paste; F2 step (b) needs a
+     *second* browser identity, and a run without it is an incomplete F2, not
+     a passing one; F2 step 3 stops the doorman and deletes its database,
+     which is safe only because `00-setup.sh` confirmed `revoke_durable`.
+  4. Phase 9 steps 5–6: Caddy against **ACME staging**, then the doorman wired
+     in. Still nothing exposed that matters.
+  5. Phase 9 step 7: the production certificate, then **F4** (a real friend, a
+     real phone, a network that is not Sam's, no instructions) and **F7** from
+     the Mac. A green F4 obtained by exposing the router early is a failed
+     milestone, not an early one.
+  6. Write up `m4-gates/RESULTS-2026-XX-XX-metal.md` from the template, with
+     the same tier honesty as every prior suite, and record the F-info wake
+     latency delta the doorman adds (not gated — A1 already carries only 15 ms
+     of margin in the production configuration, and a latency gate here would
+     conflate two problems).
+  If M4 has to be cut, **cut at the plane boundary** — ship F1–F4 + F7 with
+  `edit` ungranteable and let F5/F6 become M4.5 — never by weakening a gate.
+  Still queued behind that: the MCP stream/restore tools, segment group-commit
+  batching + GC past checkpoints, and the blog posts (four written in session
+  history; the spec-as-test-oracle harness is a strong fifth). Push commits at
+  session end (`git push`) so CI badges stay live.
 - **Promoted from side quest to margin work by the 2026-07-26 A1 run:** cut
   round trips to the object store, which Phase 7 put on the critical
   path at ~45 ms each. The production configuration now passes A1 with

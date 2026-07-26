@@ -108,15 +108,47 @@ Gates B1–B4 are pre-registered in [`m2-gates/`](m2-gates/); all four
 passed on hardware ([results](m2-gates/RESULTS-2026-07-23-nested.md)),
 including a 22 s cold-cache deploy-to-verified-ready.
 
+## The front door (M4, built — gates not yet run)
+
+Sharing an app is sending a link. The recipient opens it, signs in with
+Google, and is on the app's ACL; you never needed their address in advance.
+
+```
+krill share watchlist --plane use
+
+  https://watchlist.krill.run/_krill/s/AbCd…
+
+krill unshare watchlist --user friend@example.com
+  ✓ revoked — in force on the next request, durable before this returned
+```
+
+Three things about that are load-bearing rather than decorative:
+
+- **Authorization completes upstream of the thing that wakes apps.** Caddy
+  terminates TLS and `forward_auth`s to a small unprivileged process; only a
+  200 from it lets a request reach the router. An unauthorized request cannot
+  wake an app — and a fence that bills is still a fence that failed.
+- **Revocation is durable before it is acknowledged.** Tombstones go to object
+  storage first and are replayed at every start, so restoring the auth
+  database from any point in the past cannot resurrect access. That is the
+  same rule the data plane imposes on an app's writes, applied to auth.
+- **The app can *verify* who is calling.** It gets a 5-minute ed25519 token
+  whose audience is exactly one app, and the public key to check it against —
+  delivered on the guest's kernel command line, because apps have no outbound
+  network at all.
+
+Untrusted `docker build` runs inside a throwaway Krill microVM: the platform
+isolating its own builder with the primitive it sells.
+
 ## Roadmap
 
 | Milestone | What | Status |
 |---|---|---|
 | M1 | `krilld`: registry, VMM driver, lifecycle, wake router | **done** — A1–A4 pass on hardware |
 | M2 | deploy path: MCP server + CLI, dir → rootfs → URL | **done** — B1–B4 pass on hardware |
-| M3 | data plane: host-side WAL shipping, epoch fencing as code, PITR — the TLA+ spec becomes the test oracle | next |
-| M4 | sharing: OAuth edge, per-app identity headers, share links | |
-| M5 | second host, live lease service, lazy restore, dedupe | |
+| M3 | data plane: host-side WAL shipping, epoch fencing as code, PITR — the TLA+ spec as test oracle | **done** — C1–C4 pass on hardware |
+| M4 | the front door: OAuth edge, three-plane ACL, share links, isolated builder, egress baseline | **built** — F1–F7 pre-registered, not yet run |
+| M5 | second host, etcd-backed lease service, lazy restore, dedupe | |
 
 *Personal project, built for depth: own orchestration, own fencing protocol,
 own data plane — no wrappers.*
