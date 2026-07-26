@@ -10,6 +10,17 @@ cd "$(dirname "$0")"; source env.sh; source lib.sh
 APP_UNDER_TEST=${1:-$APP}
 SESSION=$(need_session "$SESSION_FILE")
 
+echo "== F2: snapshot the doorman BEFORE anything is revoked =="
+# Step 3 is only a real test if the snapshot it restores from PREDATES the
+# revoke. Restoring a snapshot that already contains the revocation proves
+# nothing about the log — it is M3's fixture-vacuity trap wearing a different
+# hat, and the assertion below is the tripwire for it.
+SNAP=$(dmp /v1/snapshot) || fail "F2: could not snapshot the doorman database"
+SNAP_REVS=$(printf '%s' "$SNAP" | jq -r .revocations)
+SNAP_KEY=$(printf '%s' "$SNAP" | jq -r .key)
+pass "pre-revoke snapshot $SNAP_KEY (revocations at snapshot time: $SNAP_REVS)"
+
+echo
 echo "== F2: the session works before we take anything away =="
 read -r STATUS EMAIL _ _ <<<"$(verify "$APP_UNDER_TEST" "$SESSION")"
 [ "$STATUS" = "200" ] || fail "F2: the F1 session is not working (HTTP $STATUS) — re-run f1-identity.sh"
@@ -69,6 +80,17 @@ if [ "$(id -u)" != "0" ]; then
 fi
 BEFORE=$(dm /v1/revocations | jq 'length')
 note "revocations in the log before: $BEFORE"
+[ "$BEFORE" -gt "$SNAP_REVS" ] \
+  || fail "F2: the log has no revocations the pre-revoke snapshot lacks ($BEFORE vs $SNAP_REVS).
+  The restore would carry the revocation in the snapshot itself and prove nothing."
+
+# And no snapshot may have been taken since — the hourly timer firing between
+# the revoke and here would silently weaken the test.
+NEWEST_REVS=$(dm /v1/snapshots | jq -r '.[0].revocations')
+[ "$NEWEST_REVS" = "$SNAP_REVS" ] \
+  || fail "F2: a newer snapshot ($NEWEST_REVS revocations) was taken after the revoke.
+  Restoring it would contain the revocation already. Re-run the gate."
+pass "the newest snapshot still predates the revoke — the restore is a real test"
 
 systemctl stop "$DOORMAN_UNIT" || fail "F2: could not stop $DOORMAN_UNIT"
 cp -a "$DOORMAN_STATE/doorman.db" "$RESULTS_DIR/doorman-before-loss.db" 2>/dev/null || true

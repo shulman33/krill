@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -601,7 +602,11 @@ func (s *Server) editPlane(w http.ResponseWriter, r *http.Request, rest string) 
 		http.Error(w, "misconfigured admin address", http.StatusInternalServerError)
 		return
 	}
-	q := r.URL.Query()
+	q, err := deployParams(r.URL.Query())
+	if err != nil {
+		s.deny(w, r, http.StatusBadRequest, "Bad deploy request", html.EscapeString(err.Error()))
+		return
+	}
 	// Never let a caller aim the deploy at a different app: the path is
 	// rewritten from the Host-derived name, not from anything they sent.
 	proxy := &httputil.ReverseProxy{
@@ -625,6 +630,46 @@ func (s *Server) editPlane(w http.ResponseWriter, r *http.Request, rest string) 
 	}
 	s.krilld.Forget(app)
 	proxy.ServeHTTP(w, r)
+}
+
+// deployParams filters and clamps what an edit-plane holder may ask the
+// builder for.
+//
+// Passing the caller's query string through would hand them krilld's resource
+// knobs: size_mb of a few hundred thousand fills the disk for every other app
+// on the box, and F5 FAILs on exactly that ("a resource-exhaustion build ...
+// that degrades the box for other apps"). The operator's own path through the
+// admin API keeps the unclamped versions; this is the one that arrives from
+// the network.
+func deployParams(in url.Values) (url.Values, error) {
+	out := url.Values{}
+	limits := map[string][2]int{
+		"vcpus":      {1, 4},
+		"mem_mib":    {32, 4096},
+		"guest_port": {1, 65535},
+		"size_mb":    {64, 8192},
+	}
+	for key, bounds := range limits {
+		raw := in.Get(key)
+		if raw == "" {
+			continue
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s must be a number", key)
+		}
+		if n < bounds[0] || n > bounds[1] {
+			return nil, fmt.Errorf("%s must be between %d and %d", key, bounds[0], bounds[1])
+		}
+		out.Set(key, raw)
+	}
+	// The verification wake is what turns "it built" into "it runs", and it is
+	// the only feedback a remote deployer gets. Let it be turned off, nothing
+	// else.
+	if in.Get("verify") == "false" {
+		out.Set("verify", "false")
+	}
+	return out, nil
 }
 
 func (s *Server) relayGET(w http.ResponseWriter, r *http.Request, path string) {

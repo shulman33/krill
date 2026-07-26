@@ -650,3 +650,31 @@ func mustPost(t *testing.T, c *http.Client, target string) int {
 	resp.Body.Close()
 	return resp.StatusCode
 }
+
+// An edit-plane holder gets to replace the app's code. They do not get
+// krilld's resource knobs: size_mb in the hundreds of thousands fills the
+// disk for every other app on the box, which F5 FAILs on by name.
+func TestDeployParamsAreClampedNotForwarded(t *testing.T) {
+	bad := []string{
+		"size_mb=999999", "mem_mib=131072", "vcpus=64", "guest_port=99999",
+		"size_mb=nonsense",
+	}
+	for _, q := range bad {
+		v, _ := url.ParseQuery(q)
+		if _, err := deployParams(v); err == nil {
+			t.Errorf("deployParams accepted %q", q)
+		}
+	}
+	v, _ := url.ParseQuery("size_mb=2048&vcpus=2&verify=false&data_dir=/etc&golden=/etc/passwd")
+	out, err := deployParams(v)
+	if err != nil {
+		t.Fatalf("a reasonable request was rejected: %v", err)
+	}
+	if out.Get("size_mb") != "2048" || out.Get("vcpus") != "2" || out.Get("verify") != "false" {
+		t.Fatalf("clamping dropped legitimate parameters: %v", out)
+	}
+	// Anything not on the list simply does not travel.
+	if out.Get("data_dir") != "" || out.Get("golden") != "" {
+		t.Fatalf("unknown parameters were forwarded: %v", out)
+	}
+}
