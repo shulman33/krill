@@ -5,7 +5,8 @@ verified krilld deploy. Written 2026-07-26 for the EX44-1-LTD in FSN1
 (i5-13500, 64 GB DDR4, 2×512 GB NVMe, Ubuntu 24.04, RAID1). Steps are
 sequential; each phase ends with a "verify" you must not skip.*
 
-**EXECUTED 2026-07-26 on 46.4.64.187 — Phases 0–8 complete and verified.**
+**EXECUTED 2026-07-26 on 46.4.64.187 — Phases 0–8 complete and verified.
+Phase 9 (the doorman and first exposure) is WRITTEN BUT NOT YET RUN.**
 Corrections found during the real run are folded into the phases below and
 marked ⚠. The five that would block a rebuild: the **ESP is mandatory**
 (Phase 1), `installimage` is **not on `$PATH` non-interactively** (Phase 1),
@@ -624,6 +625,281 @@ because this box has an IPv6 /64 and a v4-only filter would 403 any request
 that egresses over v6 — add it after ACME works, listing both addresses.
 At M4 the token lands as `/etc/krill/cloudflare.env`, mode `0600`, referenced
 by `EnvironmentFile=` (never inline in a unit file — those are world-readable).
+
+## Phase 9 — the doorman, and then the door (M4)
+
+*Not yet executed. Written alongside the M4 code so the sequence exists before
+anyone is tempted to improvise it at 1am.*
+
+**The order below is the milestone's PT-3 and is not negotiable.** Steps 1–6
+change nothing an outsider can reach; F1–F3, F5 and F6 are all provable
+through the tunnel while 80/443 are still closed. Only step 7 opens the door,
+and F4 and F7 run after it. A green F4 obtained by exposing the router early is
+a failed milestone, not an early one.
+
+**One consequence worth saying out loud: the router never un-loopbacks.** Caddy
+binds 443 and proxies to `127.0.0.1:8080`. The "expose the router" step that
+every earlier plan treated as the last dangerous commit simply never happens —
+a risk deleted rather than sequenced.
+
+```
+internet → Caddy :443 ──forward_auth──> krill-doorman :9090 (unprivileged)
+                    └──(only on 200)──> krilld router :8080 (loopback, root)
+```
+
+### 1. A Google OAuth client
+
+console.cloud.google.com → APIs & Services → Credentials → **OAuth client ID**,
+type *Web application*.
+
+- **Authorized redirect URI:** `https://auth.krill.run/_krill/auth/callback` —
+  exactly one, because Google matches redirect URIs exactly and a wildcard of
+  app subdomains is not possible. This is why the doorman has a single auth
+  host and hands sessions to app hosts over a one-time code.
+- **Scopes: `openid`, `email`, `profile` and nothing else.** Those are
+  non-sensitive, so the client needs no Google verification review. ⚠ This is
+  the mitigation for the known unknown recorded in the 2026-07-26 session
+  summary: F4 FAILs on "a security warning of any kind", and an unverified
+  client asking for sensitive scopes shows an interstitial. **Confirm before
+  building the flow, not the week F4 runs**: with a Testing-status client you
+  are limited to explicitly-added test users, which would also fail F4.
+
+```bash
+install -d -m 0750 -o root -g krill-doorman /etc/krill
+cat > /etc/krill/doorman.env <<'EOF'
+KRILL_GOOGLE_CLIENT_ID=<...>.apps.googleusercontent.com
+KRILL_GOOGLE_CLIENT_SECRET=<...>
+EOF
+chmod 0640 /etc/krill/doorman.env
+chown root:krill-doorman /etc/krill/doorman.env
+```
+
+Secrets go in an `EnvironmentFile`, never inline in a unit — unit files are
+world-readable.
+
+### 2. The doorman's own user, state, and object store
+
+It runs **unprivileged**. krilld is root (taps, `mkfs.ext4`, docker) and the
+internet-facing OAuth surface must not live inside it.
+
+```bash
+useradd --system --home /var/lib/krill-doorman --shell /usr/sbin/nologin krill-doorman
+install -d -m 0700 -o krill-doorman -g krill-doorman /var/lib/krill-doorman
+install -m 0755 krill-doorman-linux-amd64 /usr/local/bin/krill-doorman
+```
+
+Its object store is where revocations become durable. ⚠ **Give it its own GCS
+prefix, and its own readable copy of the credentials** — the doorman's
+recovery story and the registry's are opposite (the registry is safe to roll
+back because `cell_gen` fences it; a rolled-back revocation silently
+un-revokes a share), which is why they do not share a database and should not
+share a prefix either.
+
+```bash
+install -m 0640 -o root -g krill-doorman /etc/krill/gcs.json /etc/krill/gcs-doorman.json
+```
+
+### 3. The doorman unit
+
+```ini
+# /etc/systemd/system/krill-doorman.service
+[Unit]
+Description=krill-doorman (M4 front door)
+After=network-online.target krilld.service
+Wants=network-online.target
+
+[Service]
+User=krill-doorman
+Group=krill-doorman
+EnvironmentFile=/etc/krill/doorman.env
+Environment=KRILL_GCS_CREDENTIALS=/etc/krill/gcs-doorman.json
+ExecStart=/usr/local/bin/krill-doorman \
+  --state-dir      /var/lib/krill-doorman \
+  --listen         127.0.0.1:9090 \
+  --control        127.0.0.1:9092 \
+  --krilld-admin   http://127.0.0.1:9091 \
+  --base-host      krill.run \
+  --auth-host      auth.krill.run \
+  --scheme         https \
+  --owners         samshulman6@gmail.com \
+  --objstore       gs://krill-fsn1-objstore/doorman
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/krill-doorman
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Verify **before** anything is exposed:
+
+```bash
+systemctl enable --now krill-doorman
+curl -s 127.0.0.1:9092/v1/status | jq '{base_host, auth_host, revoke_durable, identity_key}'
+# revoke_durable MUST be true. If it is false, every revoke will be refused
+# and F2 cannot pass — which is the intended failure, not a bug to work around.
+```
+
+### 4. Teach krilld about the doorman's key, the builder VM, and egress
+
+Three additions to `/etc/systemd/system/krilld.service` (⚠ read the live file
+first — it carries Phase 7's `--objstore gs://…` and backup flags; a backup
+was left at `krilld.service.bak-2026-07-26`):
+
+```
+  --identity-pubkey-file /var/lib/krill-doorman/identity.pub \
+  --route-suffixes       krill.run,krill.local \
+  --build-vm-image       /srv/fc/builder.ext4 \
+  --build-vm-kernel      /srv/fc/vmlinux-builder \
+  --build-isolation      untrusted \
+  --egress-build-allow   deb.debian.org,security.debian.org,pypi.org,files.pythonhosted.org
+```
+
+- **`--identity-pubkey-file`** is how a guest with no outbound network can
+  still verify who is calling it: krilld appends `krill_idkey=<b64>` to every
+  guest's kernel command line, and the generated init exports it. The file is
+  world-readable on purpose and rewritten by the doorman at every start; a
+  stale copy would make every app reject every token, which `m4-gates/00-setup.sh`
+  checks for.
+- **`--route-suffixes`** is defense in depth. The doorman pins the suffix
+  unconditionally; this closes the same hole at the loopback router. Include
+  `krill.local` or the gate suites — which correctly send `krill.local` —
+  stop routing.
+- **`--egress-build-allow`** is the deliberate widening: "the registry and
+  nothing else" is the right posture and almost every real Dockerfile also
+  runs `apt-get` or `pip install`. Leave it empty if you would rather find out
+  the hard way which images need it.
+
+Then build the builder image once (`m4-gates/builder-image/README.md` has the
+open kernel question, which is the one thing here likely to need iteration):
+
+```bash
+sudo m4-gates/builder-image/build.sh /srv/fc/builder.ext4
+systemctl restart krilld
+journalctl -u krilld -n 40 | grep -E 'isolated builder|egress baseline'
+```
+
+### 5. Caddy, against ACME **staging**, serving nothing
+
+Deliberately before the doorman is wired in: this is the only piece with an
+external dependency that can fail in ways you do not control, and Let's
+Encrypt rate-limits **per registered domain per week** — a handful of botched
+production attempts costs you `krill.run` for seven days.
+
+```bash
+apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf https://dl.cloudsmith.io/public/caddy/xcaddy/gpg.key \
+  | gpg --dearmor -o /usr/share/keyrings/caddy-xcaddy-archive-keyring.gpg
+# Caddy needs the cloudflare DNS module compiled in — the stock binary has no
+# DNS-01 provider, and ACME can only issue *.krill.run over DNS-01.
+apt-get install -y golang-go
+GOBIN=/usr/local/bin go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest
+xcaddy build --with github.com/caddy-dns/cloudflare --output /usr/local/bin/caddy
+/usr/local/bin/caddy list-modules | grep dns.providers.cloudflare   # must print
+```
+
+The token from Phase 8 lands now:
+
+```bash
+install -d -m 0750 -o root -g caddy /etc/krill
+printf 'CF_API_TOKEN=%s\n' '<token>' > /etc/krill/cloudflare.env
+chmod 0640 /etc/krill/cloudflare.env && chown root:caddy /etc/krill/cloudflare.env
+```
+
+`/etc/caddy/Caddyfile` — see `deploy/Caddyfile` in the repo for the annotated
+version; the shape is:
+
+```caddyfile
+{
+    # STAGING FIRST. Delete this line only once a staging cert has issued.
+    acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+    email samshulman6@gmail.com
+}
+
+*.krill.run, krill.run {
+    tls { dns cloudflare {env.CF_API_TOKEN} }
+    respond "krill" 404
+}
+```
+
+```bash
+ufw allow 80/tcp && ufw allow 443/tcp    # ⚠ this is the first inbound opening
+systemctl enable --now caddy
+journalctl -u caddy -f | grep -i certificate     # watch DNS-01 complete
+```
+
+⚠ **If DNS-01 fails with something that reads like a generic auth error**, the
+token is almost certainly missing `Zone:Zone:Read` — `DNS:Edit` alone cannot
+resolve the zone ID (Phase 8, gotcha 3).
+
+### 6. Wire the doorman in, still on staging
+
+Replace the `respond` with the real thing (annotated in `deploy/Caddyfile`):
+
+```caddyfile
+*.krill.run, krill.run {
+    tls { dns cloudflare {env.CF_API_TOKEN} }
+
+    # Never let a client supply its own identity headers.
+    request_header -X-App-User
+    request_header -X-App-User-Id
+    request_header -X-App-User-Name
+    request_header -X-App-Plane
+    request_header -X-Krill-Token
+
+    # The doorman owns /_krill/* on every host: the OAuth callback, the share
+    # links, JWKS, logout. forward_auth cannot serve these — they are the flow
+    # itself, not a check on it.
+    handle /_krill/* {
+        reverse_proxy 127.0.0.1:9090
+    }
+
+    handle {
+        forward_auth 127.0.0.1:9090 {
+            uri /_krill/auth/verify
+            copy_headers X-App-User X-App-User-Id X-App-User-Name X-App-Plane X-Krill-Token
+        }
+        # Reached ONLY on a 200 above. A redirect to Google, a 403 or a 404
+        # is returned to the browser verbatim and never touches krilld — which
+        # is what makes "no unauthorized request wakes an app" structural.
+        reverse_proxy 127.0.0.1:8080 {
+            # The guest must not see the session cookie. It is host-only
+            # already, so this is belt and braces on an untrusted guest.
+            header_up Cookie "(^|; ?)(__Host-)?krill_app=[^;]*;?" ""
+        }
+    }
+}
+```
+
+Now run the tunnel-era gates — **all of F1, F2, F3, F5 and F6** — before
+touching the staging line. They do not need the public listener.
+
+### 7. Production certificate, then F4 and F7
+
+Only once every earlier gate is green:
+
+```bash
+sed -i '/acme_ca/d' /etc/caddy/Caddyfile
+systemctl reload caddy
+journalctl -u caddy -n 50 | grep -i 'certificate obtained'
+```
+
+Then, from the Mac (**not** from the box — the outside view is the point):
+
+```bash
+cd m4-gates && BOX_IP=46.4.64.187 ./f7-exposure.sh
+```
+
+⚠ **Phase 8's port scan is superseded here and nowhere else**: 80 and 443 must
+now answer, while 8080, 9090, 9091 and 9092 must still refuse. Everything else
+Phase 8 asserted still holds.
+
+F4 last: `krill share watchlist --plane use`, send the link over iMessage with
+no instructions, and watch.
 
 ## Running the gate suites on this box (they assume they own the machine)
 

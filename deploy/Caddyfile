@@ -1,0 +1,93 @@
+# Krill's front door. Install to /etc/caddy/Caddyfile on the production box;
+# SERVER-SETUP.md Phase 9 is the surrounding procedure.
+#
+# The whole security argument of M4 lives in the shape of this file:
+#
+#     internet → Caddy :443 ──forward_auth──> krill-doorman :9090
+#                         └──(only on 200)──> krilld router :8080
+#
+# krilld's router wakes an app on request, and F3 forbids an unauthorized
+# request from waking anything ("a fence that bills is still a fence that
+# failed"). So authorization has to complete strictly upstream of krilld, and
+# `forward_auth` is exactly that: a non-2xx from the doorman is returned to
+# the browser verbatim and the reverse_proxy below never runs.
+#
+# It also means THE ROUTER NEVER UN-LOOPBACKS. Caddy binds 443 and proxies
+# inward. The "expose the router" step earlier plans treated as the last
+# dangerous commit simply never happens.
+
+{
+	# ⚠ ACME STAGING. Delete this line only after a staging certificate has
+	# issued cleanly. Let's Encrypt rate-limits per registered domain per
+	# week, so a handful of botched production attempts costs you krill.run
+	# for seven days — and DNS-01 is the piece with an external dependency
+	# that can fail in ways you do not control.
+	acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+	email samshulman6@gmail.com
+}
+
+*.krill.run, krill.run {
+	# A wildcard certificate can only be issued over DNS-01, which needs a
+	# provider API token. Phase 8 staged one scoped to Zone:DNS:Edit +
+	# Zone:Zone:Read on this zone only. ⚠ Zone:Read is not optional —
+	# DNS:Edit alone cannot resolve the zone ID, and the failure reads like
+	# a generic auth error while you are mid-ACME.
+	tls {
+		dns cloudflare {env.CF_API_TOKEN}
+	}
+
+	# Strip any identity a client tried to assert. forward_auth's
+	# copy_headers replaces these on the way upstream, but a request that
+	# never reaches an authorized path must not carry them either.
+	request_header -X-App-User
+	request_header -X-App-User-Id
+	request_header -X-App-User-Name
+	request_header -X-App-Plane
+	request_header -X-Krill-Token
+
+	# The doorman owns /_krill/* on EVERY host it fronts: the OAuth callback,
+	# share links, the cross-host handoff, JWKS, logout, and the data and
+	# edit share planes. These cannot sit behind forward_auth — they are the
+	# sign-in flow itself, not a check on it. Apps therefore cannot serve
+	# paths under /_krill/; that prefix is reserved.
+	handle /_krill/* {
+		reverse_proxy 127.0.0.1:9090
+	}
+
+	handle {
+		forward_auth 127.0.0.1:9090 {
+			uri /_krill/auth/verify
+			copy_headers X-App-User X-App-User-Id X-App-User-Name X-App-Plane X-Krill-Token
+		}
+
+		# Reached ONLY on a 200 from the doorman.
+		reverse_proxy 127.0.0.1:8080 {
+			# The guest must never see the session cookie. It is already
+			# host-only and scoped to this one app, so a hostile guest could
+			# at worst replay its own user's own access — but guests run
+			# agent-written code, and handing them a credential they have no
+			# use for is not a trade worth making.
+			header_up Cookie "(^|; ?)(__Host-)?krill_app=[^;]*;?" ""
+
+			# A cold wake is a snapshot restore plus a guest's first response.
+			# The router holds the request through it; Caddy must not give up
+			# first, or a wake becomes a 502 for the user and a billed wake
+			# for us.
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 120s
+			}
+		}
+	}
+
+	log {
+		output file /var/log/caddy/krill.log
+		format json
+	}
+}
+
+# The auth host is covered by the wildcard above and needs no block of its
+# own: auth.krill.run matches *.krill.run, its /_krill/* routes go to the
+# doorman, and everything else there 404s at the doorman because "auth" is not
+# an app name. That is deliberate — auth.krill.run must never be routable to a
+# guest, and the doorman's own host check enforces it independently of Caddy.
