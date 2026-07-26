@@ -83,7 +83,7 @@ becomes a running, scale-to-zero app in one command:
 ```
 $ krill deploy ./guestbook
 ✓ deployed guestbook (created, 1024 MB image, build 22.1s)
-  url:  http://guestbook.krill.local:8080/
+  url:  http://guestbook.krill.run:8080/
   ready: yes (first wake 1946 ms, state ACTIVE)
 ```
 

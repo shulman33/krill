@@ -562,11 +562,54 @@ Session-level gotchas not recorded elsewhere:
   unreachable. Deleting them is safe: deterministic host MACs mean a
   re-created tap keeps restored guests' ARP caches valid, verified by
   waking both apps afterwards with no rebuild and no fence.
+  **2026-07-26 (final): THE PROJECT HAS A NAME — `krill.run`, and M4's
+  DNS prerequisites are closed** (`SERVER-SETUP.md` **Phase 8**).
+  Registrar + DNS is Cloudflare, chosen for the M4 wildcard certificate:
+  ACME can only issue `*.krill.run` over **DNS-01**, which needs a
+  provider API token, and `caddy-dns/cloudflare` is the best-supported
+  path. `.run` was picked over `.dev`/`.app` because those are
+  HSTS-preloaded — browsers would refuse plain HTTP, killing tunnel-era
+  testing before the doorman exists. Live and verified from a public
+  resolver: `*.krill.run` + apex → 46.4.64.187 (TTL 300, all records
+  **grey-cloud / DNS-only**, so M4's Caddy sees raw clients), plus
+  `*.local.krill.run` → 127.0.0.1 for tunnel-era browsing — **which the
+  home gateway strips (DNS-rebinding protection), so it needs
+  `/etc/resolver/krill.run` on the Mac; the record itself is correct and
+  resolves at 1.1.1.1** (diagnosis + fix in Phase 6). Mail is locked down before
+  the name ever appears in a share link: null MX (`0 .`),
+  `v=spf1 -all`, `p=reject`. `--base-host krill.run` is set on the box.
+  **Posture unchanged and re-proven** — SSH-only inbound, router+admin
+  on loopback; the name resolves to a closed door. Also staged for M4:
+  a Cloudflare token scoped to `Zone:DNS:Edit` **+ `Zone:Zone:Read`**
+  (both required — `DNS:Edit` alone cannot resolve the zone ID) on the
+  `krill.run` zone only, no TTL (a TTL means silent renewal failure at
+  60–90 days) and no client-IP filter (this box's IPv6 /64 would 403 a
+  v4-only filter). **Nothing in Go changed:** `--base-host` is cosmetic —
+  `router.appName` reads only the first `Host` label and never checks the
+  suffix, so routing cannot break and the gate suites keep sending
+  `krill.local` correctly. That same gap is an M4 requirement: **the
+  doorman must pin the host suffix**, a natural F3 ingredient. The
+  daemon default stays `krill.local` (right for a box with no DNS).
 - **Next action:** M4 (the doorman: edge auth, share links, the
   three-plane ACL), built per decision #8 — proven components for the
   OAuth/session/JWT plumbing, hand-written ACL and per-app token scoping;
   builder isolation and the egress baseline enter M4 scope once shares
-  reach untrusted people. Or the queued side quests first: the
+  reach untrusted people. **Its infrastructure prerequisites are now all
+  closed** (Phase 7 durability, Phase 8 DNS + ACME token), so the next
+  concrete step is the discipline every prior milestone used: **freeze
+  the acceptance gates before writing doorman code.** ⚠ Name them
+  **F1–F4** ("F" for front door) — the natural next letter, D, collides
+  with the durability contract D1–D4, which is load-bearing across the
+  spec and both HTML docs (CLAUDE.md tripwire); note the skipped letter
+  in the gates file. Candidates: F1 unauthenticated request to a shared
+  app → Google login → app serves with correct `X-App-User`; F2 revoke
+  takes effect on the next request; F3 the three planes actually
+  separate (a use-only user cannot reach the data/edit surfaces —
+  **and the router pins the host suffix**, which it does not today);
+  F4 the human gate — a non-technical friend opens a share link cold,
+  zero setup. Note F1 and F4 are the two that genuinely required a
+  domain; F2/F3 are provable over the tunnel. Or the queued side quests
+  first: the
   guest-egress netfilter baseline (the metadata-IP drop is one rule —
   cheapest risk-close on the board), MCP stream/restore tools,
   segment group-commit batching + GC past checkpoints (both noted in the

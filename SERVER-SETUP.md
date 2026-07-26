@@ -5,7 +5,7 @@ verified krilld deploy. Written 2026-07-26 for the EX44-1-LTD in FSN1
 (i5-13500, 64 GB DDR4, 2×512 GB NVMe, Ubuntu 24.04, RAID1). Steps are
 sequential; each phase ends with a "verify" you must not skip.*
 
-**EXECUTED 2026-07-26 on 46.4.64.187 — Phases 0–7 complete and verified.**
+**EXECUTED 2026-07-26 on 46.4.64.187 — Phases 0–8 complete and verified.**
 Corrections found during the real run are folded into the phases below and
 marked ⚠. The five that would block a rebuild: the **ESP is mandatory**
 (Phase 1), `installimage` is **not on `$PATH` non-interactively** (Phase 1),
@@ -18,7 +18,9 @@ SSH (port 22) is the only open inbound port. The router and admin API
 both bind loopback; you reach them through an SSH tunnel. There is no
 auth in front of apps yet — the doorman is M4 — so exposing port 8080
 to the internet before then would let anyone use (and wake, and bill)
-every app on the box.
+every app on the box. **`krill.run` now resolves to this box (Phase 8)
+and changes none of that** — the name points at a closed door, and
+`curl http://<app>.krill.run/` must time out until M4 says otherwise.
 
 ---
 
@@ -233,7 +235,7 @@ ExecStart=/usr/local/bin/krilld \
   --kernel /srv/fc/vmlinux \
   --listen 127.0.0.1:8080 \
   --admin 127.0.0.1:9091 \
-  --base-host krill.local \
+  --base-host krill.run \
   --idle-timeout 60s
 Restart=always
 RestartSec=2
@@ -253,8 +255,13 @@ Two flags deliberately differ from the daemon defaults:
 - `--listen 127.0.0.1:8080` — the default is `:8080` (all
   interfaces). **Loopback until the doorman exists.** Flipping this to
   public IS the M4 launch step, and it happens together with TLS + auth.
-- `--base-host krill.local` — change to your real domain when you buy
-  one (apps then print clickable `<app>.<domain>` URLs).
+- `--base-host krill.run` — the real domain, bought 2026-07-26 (**Phase 8**).
+  The daemon's *default* is still `krill.local`, which is correct for a box
+  with no DNS; this box overrides it so deploys print real URLs. Note this
+  flag is **cosmetic**: the router reads only the first DNS label of the
+  `Host` header (`appName`, `internal/router/router.go`) and never checks the
+  suffix, so changing it cannot break routing — and the gate suites can keep
+  sending `Host: <app>.krill.local` forever. Suffix pinning is M4's job.
 
 Defaults doing the right thing already: data plane + sync-ack on, cell-gen 1,
 registry backups every 24 h keeping 14. The objstore default
@@ -295,14 +302,43 @@ output means the whole path worked: tar → docker build → mkfs.ext4 →
 boot → probe. Then exercise the router and a sleep/wake cycle:
 
 ```bash
-curl -H "Host: guestbook.krill.local" http://127.0.0.1:8080/   # through the tunnel
+curl -H "Host: guestbook.krill.run" http://127.0.0.1:8080/   # through the tunnel
 krill freeze guestbook && sleep 1
-time curl -H "Host: guestbook.krill.local" http://127.0.0.1:8080/   # wake-on-request
+time curl -H "Host: guestbook.krill.run" http://127.0.0.1:8080/   # wake-on-request
 krill status guestbook
 ```
 
-To click URLs in a browser, add `127.0.0.1 guestbook.krill.local` to the
-Mac's `/etc/hosts` (per app, tunnel era only — real DNS arrives with M4).
+To click URLs in a browser, use the loopback wildcard from Phase 8:
+`http://guestbook.local.krill.run:8080/` resolves to `127.0.0.1` in public
+DNS, so with the tunnel up it works with no `/etc/hosts` line per app. (It
+routes identically because the router only reads the first label.)
+
+⚠ **Verified broken on Sam's home network, 2026-07-26 — expect this.** The
+gateway there (`2600:4040:a4c9:c900::1`) answers `NOERROR` with an *empty*
+answer section for any public name resolving into loopback/private space:
+**DNS-rebinding protection.** It is not specific to this zone — the
+well-known `localtest.me` is stripped identically, while `ledger.krill.run`
+resolves fine through the same resolver. Diagnose in one line:
+
+```bash
+dig +short ledger.local.krill.run            # empty  → your resolver strips it
+dig +short ledger.local.krill.run @1.1.1.1   # 127.0.0.1 → the record is fine
+```
+
+The scoped fix — send **only** `krill.run` to a resolver that doesn't
+rebind-protect, leaving the rest of the Mac's DNS alone:
+
+```bash
+sudo mkdir -p /etc/resolver
+printf 'nameserver 1.1.1.1\n' | sudo tee /etc/resolver/krill.run
+# `dig` bypasses /etc/resolver by design — verify with the SYSTEM resolver:
+dscacheutil -q host -a name ledger.local.krill.run
+curl -m 5 -s http://ledger.local.krill.run:8080/
+```
+
+Blunter alternatives: point the Mac's DNS at `1.1.1.1` globally, or fall back
+to a per-app `127.0.0.1 guestbook.krill.run` line in `/etc/hosts`. All of this
+is tunnel-era only — it evaporates when M4 serves these names for real.
 
 ⚠ **Time the wake on the host, never through the tunnel.** A `curl` from the
 Mac to FSN1 carries ~100 ms of transatlantic RTT that has nothing to do with
@@ -531,6 +567,64 @@ gunzip -c /tmp/restore/_control/registry/<newest>.db.gz > /srv/krill/krill.db
 Apps' rootfs images do not live in the object store: redeploy them (`krill
 deploy`), which is also how they were created.
 
+## Phase 8 — the name (`krill.run`, bought 2026-07-26)
+
+Done **before** M4, deliberately: DNS propagation, TLD choice and DNS-provider
+choice all gate the doorman, and each is the kind of thing that stalls a
+milestone when discovered mid-build. **This phase changes no posture** — the
+name points at a closed door. Registrar and DNS: **Cloudflare** (at-cost, and
+its DNS API is what the M4 wildcard certificate will need).
+
+⚠ **TLD constraint, not taste:** `.dev`, `.app` and `.page` are HSTS-preloaded,
+so browsers refuse plain HTTP on them unconditionally — that would have killed
+tunnel-era `http://…:8080` testing before the doorman exists. `.run` is
+Identity Digital, not preloaded (verified against hstspreload.org).
+
+The zone, all records **DNS only** (grey cloud — Cloudflare's proxy can't reach
+8080, and M4 wants raw client behavior arriving at our own edge):
+
+| Name | Type | Value | Why |
+|---|---|---|---|
+| `*.krill.run` | A | `46.4.64.187` | the app wildcard — `<app>.krill.run` |
+| `krill.run` | A | `46.4.64.187` | apex; a wildcard does not match the bare name |
+| `*.local.krill.run` | A | `127.0.0.1` | tunnel-era browsing — ⚠ needs `/etc/resolver/krill.run`, see Phase 6 |
+| `krill.run` | MX | `0 .` | null MX (RFC 7505): this domain sends/receives no mail |
+| `krill.run` | TXT | `v=spf1 -all` | anti-spoofing — the name will appear in links sent to other people |
+| `_dmarc.krill.run` | TXT | `v=DMARC1; p=reject; adkim=s; aspf=s` | `p=reject` is inherited by subdomains |
+
+The mail lockdown is posture, not decoration: `krill.run` is about to start
+appearing in share links, and an unprotected domain is trivially spoofable.
+Reverse it only if the platform ever sends mail — and then per the egress note
+below, through a transactional HTTPS API, never SMTP from this IP.
+
+Verify from a resolver that isn't yours:
+
+```bash
+dig +short NS krill.run @1.1.1.1                   # cloudflare NS = delegation landed
+dig +short anything.krill.run @1.1.1.1             # → 46.4.64.187 (wildcard)
+dig +short ledger.local.krill.run @1.1.1.1         # → 127.0.0.1
+dig +short TXT _dmarc.krill.run @1.1.1.1
+```
+
+Then set `--base-host krill.run` in the unit (Phase 5) and **re-prove the
+posture from the Mac** — a name that resolves must still reach nothing:
+
+```bash
+nc -vz -w 5 46.4.64.187 8080     # must fail
+nc -vz -w 5 46.4.64.187 9091     # must fail
+curl -m 5 http://ledger.krill.run/ ; echo "exit=$?"   # must time out, not serve
+```
+
+**Staged for M4, already done:** a Cloudflare API token scoped to
+`Zone:DNS:Edit` **+ `Zone:Zone:Read`** (both required by
+`caddy-dns/cloudflare`; `DNS:Edit` alone cannot resolve the zone ID) on the
+`krill.run` zone only, no TTL and no client-IP filter. A TTL here would mean
+silent certificate-renewal failure 60–90 days out; the IP filter is deferred
+because this box has an IPv6 /64 and a v4-only filter would 403 any request
+that egresses over v6 — add it after ACME works, listing both addresses.
+At M4 the token lands as `/etc/krill/cloudflare.env`, mode `0600`, referenced
+by `EnvironmentFile=` (never inline in a unit file — those are world-readable).
+
 ## Running the gate suites on this box (they assume they own the machine)
 
 `m1-gates/` and `wake-bench/` were written for throwaway bench VMs where
@@ -581,7 +675,7 @@ cd /root/krill/wake-bench
 # --- after ---
 pkill -x krilld; ip link delete tap0 2>/dev/null || true
 systemctl start krilld
-curl -s -H "Host: ledger.krill.local" http://127.0.0.1:8080/   # sanity
+curl -s -H "Host: ledger.krill.run" http://127.0.0.1:8080/   # sanity
 ```
 
 **Already staged on this box (2026-07-26), so the timed runs are one command
@@ -630,7 +724,9 @@ unattended-upgrades and is written for a machine you throw away.
 
 ## What this box is still waiting for (do NOT pre-empt)
 
-- Public 80/443, TLS, wildcard DNS, and un-loopbacking the router: all
-  land together as part of **M4** (doorman first, exposure second).
+- Public 80/443, TLS, and un-loopbacking the router: all land together as
+  part of **M4** (doorman first, exposure second). Wildcard DNS and the
+  ACME-capable API token are **already done** (Phase 8) — deliberately
+  ahead of M4, because they gate it and nothing else.
 - Builder isolation + full egress policy: per the ROADMAP posture map,
   required before anyone untrusted can deploy or edit-share.
