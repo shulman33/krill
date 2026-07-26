@@ -23,13 +23,27 @@ umount /mnt/krill-rootfs
 docker rm "$cid" >/dev/null
 echo "   golden: $GOLDEN ($(du -h --apparent-size "$GOLDEN" | cut -f1) apparent)"
 
+# A systemd-managed krilld is the production daemon, not a leftover: pkilling
+# it just makes systemd restart it (Restart=always) and then two daemons fight
+# over the same ports, taps and data dir. Refuse, and say what to do.
+if systemctl is-active --quiet krilld 2>/dev/null; then
+  echo "FATAL: krilld is running under systemd on this box." >&2
+  echo "  systemctl stop krilld     # and start it again when the gates finish" >&2
+  echo "  Then re-run with a scratch data dir so production state is untouched:" >&2
+  echo "  KRILL_DATA=/srv/krill-gates ./00-setup.sh" >&2
+  exit 1
+fi
+
 echo "== starting krilld =="
+echo "   data-dir $KRILL_DATA, idle-timeout $IDLE_TIMEOUT, extra flags: ${KRILLD_EXTRA_FLAGS:-(none)}"
 install -m 0755 ./krilld /usr/local/bin/krilld
 pkill -x krilld 2>/dev/null && sleep 1 || true
+# shellcheck disable=SC2086  # KRILLD_EXTRA_FLAGS is deliberately word-split
 nohup /usr/local/bin/krilld \
   --data-dir "$KRILL_DATA" \
   --kernel "$KERNEL" \
   --idle-timeout "$IDLE_TIMEOUT" \
+  $KRILLD_EXTRA_FLAGS \
   >>"$KRILLD_LOG" 2>&1 &
 echo $! > /run/krilld.pid
 sleep 1

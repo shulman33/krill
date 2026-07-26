@@ -531,6 +531,69 @@ gunzip -c /tmp/restore/_control/registry/<newest>.db.gz > /srv/krill/krill.db
 Apps' rootfs images do not live in the object store: redeploy them (`krill
 deploy`), which is also how they were created.
 
+## Running the gate suites on this box (they assume they own the machine)
+
+`m1-gates/` and `wake-bench/` were written for throwaway bench VMs where
+nothing else ran. This box hosts production, and two collisions bite:
+
+⚠ **`m1-gates/00-setup.sh` used to `pkill -x krilld`.** Under
+`Restart=always` that just makes systemd start a new one, and then two daemons
+fight over ports 8080/9091, the tap devices, and the data dir. The script now
+**refuses to run while the unit is active** and tells you to stop it.
+
+⚠ **`wake-bench` wants `172.16.0.1/24` on `tap0`; krilld already has
+`172.16.0.1/30` on `krill0`.** Same address, and the bench's `/24` covers every
+app subnet. The `/30` is more specific, so packets for the bench guest
+(`172.16.0.2`) route out `krill0` — which is `linkdown` — and the bench dies at
+its warm-up pings. krilld's taps **persist across freeze**, so stopping the
+daemon is not enough: delete them.
+
+Deleting `krill0`/`krill1` is safe and reversible. Host-side MACs are
+deterministic by design (`internal/network`, the same scheme the bench uses)
+precisely so a re-created tap keeps restored guests' ARP caches valid.
+**Verified 2026-07-26:** after deleting both taps and running the bench, both
+apps woke from their existing snapshots with no rebuild and no fence, and
+`ledger`'s rows were intact.
+
+```bash
+# --- before any gate run ---
+systemctl stop krilld
+for t in krill0 krill1; do ip link delete "$t" 2>/dev/null || true; done
+
+# --- A1 on metal, with a SCRATCH data dir so production state is untouched ---
+cd /root/krill/m1-gates
+install -m 0755 /root/krill/bin/krilld-linux-amd64 ./krilld
+# Three runs make the tiers comparable and price Phase 7 honestly:
+#   1. data plane OFF   → comparable to the 2026-07-23 nested A1 numbers
+#   2. data plane + fsstore → comparable to the M3 gate numbers (p50 205 ms)
+#   3. data plane + GCS  → the real production configuration
+KRILL_DATA=/srv/krill-gates KRILLD_EXTRA_FLAGS='--data-plane=false' ./00-setup.sh
+./a1-warm-wake.sh
+# then, for runs 2 and 3, rm -rf /srv/krill-gates and repeat with
+#   KRILLD_EXTRA_FLAGS='--objstore file:///srv/krill-gates/objstore'
+#   KRILLD_EXTRA_FLAGS='--objstore gs://krill-fsn1-objstore/gate-scratch'
+# (a scratch PREFIX, never the production one — gate apps must not land in it)
+
+# --- G4, the last open benchmark gate (no krilld involved; drives FC directly) ---
+cd /root/krill/wake-bench
+./30-storm.sh python 50        # snapshot already staged, see below
+
+# --- after ---
+pkill -x krilld; ip link delete tap0 2>/dev/null || true
+systemctl start krilld
+curl -s -H "Host: ledger.krill.local" http://127.0.0.1:8080/   # sanity
+```
+
+**Already staged on this box (2026-07-26), so the timed runs are one command
+each:** `02-build-guests.sh` has run (python + node ext4 images in `/srv/fc`),
+and `10-boot-and-snapshot.sh python` has produced `/srv/snaps/python/`
+(`mem` 104 MB actual after balloon, `vmstate` 14 KB). **Untimed prep, but one
+real number fell out of it: cold boot-to-first-200 on metal is 904 ms**, versus
+~1.67 s implied by the nested G5 ratio — about 1.8× faster. Not a gate result.
+
+`00-host-setup.sh` stays **unrun** on this box, deliberately: it disables
+unattended-upgrades and is written for a machine you throw away.
+
 ## Notes & gotchas specific to this box
 
 - ⚠ **`guestbook` is not data-plane-backed.** It writes
