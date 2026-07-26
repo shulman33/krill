@@ -151,3 +151,57 @@ func TestDelete(t *testing.T) {
 		t.Fatalf("double delete: want ErrNotFound, got %v", err)
 	}
 }
+
+// TestBackupTo: the snapshot must be a valid, complete registry — including
+// rows that are still only in the WAL (synchronous=FULL commits them, but
+// they have not been checkpointed into the main db file).
+func TestBackupTo(t *testing.T) {
+	dir := t.TempDir()
+	r, err := Open(filepath.Join(dir, "krill.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, n := range []string{"guestbook", "ledger"} {
+		if _, err := r.Create(App{Name: n, VCPUs: 1, MemMiB: 128, GuestPort: 8080, State: "COLD"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.MintEpoch("guestbook"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.MintEpoch("guestbook"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := r.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Apps != 2 || st.MaxEpoch != 2 {
+		t.Fatalf("Stats() = %+v, want 2 apps / max epoch 2", st)
+	}
+
+	dst := filepath.Join(dir, "backup.db")
+	if err := r.BackupTo(dst); err != nil {
+		t.Fatalf("BackupTo: %v", err)
+	}
+	if err := r.BackupTo(dst); err == nil {
+		t.Error("BackupTo overwrote an existing file")
+	}
+
+	// The restored copy must be openable and carry every fact, epochs included.
+	r2, err := Open(dst)
+	if err != nil {
+		t.Fatalf("opening the backup: %v", err)
+	}
+	defer r2.Close()
+	apps, err := r2.List()
+	if err != nil || len(apps) != 2 {
+		t.Fatalf("restored List() = %d apps, %v", len(apps), err)
+	}
+	// A restored mint re-issues epoch 3 — which is exactly why E1 demands a
+	// --cell-gen bump after a restore.
+	if c, err := r2.MintEpoch("guestbook"); err != nil || c != 3 {
+		t.Fatalf("restored MintEpoch = %d, %v; want the counter to survive", c, err)
+	}
+}

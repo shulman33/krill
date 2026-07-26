@@ -13,6 +13,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"time"
 
@@ -280,6 +281,46 @@ func (r *Registry) MintEpoch(name string) (uint32, error) {
 // SetStreamID repoints the app at a new data-plane stream (PITR restore).
 func (r *Registry) SetStreamID(name, stream string) error {
 	return r.update(name, `stream_id = ?`, stream)
+}
+
+// Stats summarizes what a backup of this database would contain. MaxEpoch is
+// the highest counter the mint has issued to any app: after restoring a
+// backup, --cell-gen must be bumped (E1) precisely because a restored mint
+// can re-issue counters at or below this value.
+type Stats struct {
+	Apps     int    `json:"apps"`
+	MaxEpoch uint64 `json:"max_epoch"`
+}
+
+func (r *Registry) Stats() (Stats, error) {
+	var s Stats
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM apps`).Scan(&s.Apps); err != nil {
+		return s, err
+	}
+	var max sql.NullInt64
+	if err := r.db.QueryRow(`SELECT MAX(counter) FROM epochs`).Scan(&max); err != nil {
+		return s, err
+	}
+	if max.Valid && max.Int64 > 0 {
+		s.MaxEpoch = uint64(max.Int64)
+	}
+	return s, nil
+}
+
+// BackupTo writes a consistent snapshot of the registry to path via
+// VACUUM INTO: a single transaction against the live database, so it captures
+// committed WAL content and needs no quiesce. Copying krill.db with cp would
+// race the -wal file and can produce a torn catalog.
+//
+// The target must not exist (SQLite's own precondition).
+func (r *Registry) BackupTo(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("registry backup: %s already exists (VACUUM INTO refuses to overwrite)", path)
+	}
+	if _, err := r.db.Exec(`VACUUM INTO ?`, path); err != nil {
+		return fmt.Errorf("registry backup to %s: %w", path, err)
+	}
+	return nil
 }
 
 func (r *Registry) update(name, setClause string, val any) error {

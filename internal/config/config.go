@@ -62,6 +62,18 @@ type Config struct {
 	// ceiling, not an allocation).
 	DataDiskMB int
 
+	// RegistryBackupStore is where registry snapshots are shipped; empty
+	// means the data-plane object store. The registry is the epoch mint and
+	// the app catalog — the one thing on the box that nothing else can
+	// reconstruct — so this should resolve to storage that survives the host.
+	RegistryBackupStore string
+	// RegistryBackupInterval is the target age of the newest backup (0 =
+	// off). Age-driven, not uptime-driven: a restarting daemon does not
+	// re-ship, and a daemon down for a day ships as soon as it is back.
+	RegistryBackupInterval time.Duration
+	// RegistryBackupKeep is how many snapshots to retain.
+	RegistryBackupKeep int
+
 	// SnapshotBalloon toggles the balloon inflate/deflate cycle during
 	// freeze. Inflating reclaims guest free pages, shrinking the stored mem
 	// file — but the reclaim also evicts the guest's page cache, which the
@@ -77,24 +89,28 @@ type Config struct {
 
 func Default() Config {
 	return Config{
-		DataDir:         "/srv/krill",
-		ListenAddr:      ":8080",
-		AdminAddr:       "127.0.0.1:9091",
-		KernelPath:      "/srv/fc/vmlinux",
-		FirecrackerBin:  "firecracker",
-		BaseHost:        "krill.local",
-		DockerBin:       "docker",
-		BuildTimeout:    10 * time.Minute,
-		IdleTimeout:     60 * time.Second,
-		WakeTimeout:     30 * time.Second,
-		Objstore:        "", // resolved to file://<DataDir>/objstore at startup
-		DataPlane:       true,
-		SyncAck:         true,
-		CellGen:         1,
-		DataDiskMB:      256,
-		SnapshotBalloon: true,
-		BalloonSettle:   5 * time.Second,
-		DeflateSettle:   1 * time.Second,
+		DataDir:        "/srv/krill",
+		ListenAddr:     ":8080",
+		AdminAddr:      "127.0.0.1:9091",
+		KernelPath:     "/srv/fc/vmlinux",
+		FirecrackerBin: "firecracker",
+		BaseHost:       "krill.local",
+		DockerBin:      "docker",
+		BuildTimeout:   10 * time.Minute,
+		IdleTimeout:    60 * time.Second,
+		WakeTimeout:    30 * time.Second,
+		Objstore:       "", // resolved to file://<DataDir>/objstore at startup
+		DataPlane:      true,
+		SyncAck:        true,
+		CellGen:        1,
+		DataDiskMB:     256,
+
+		RegistryBackupStore:    "", // resolved to the data-plane objstore
+		RegistryBackupInterval: 24 * time.Hour,
+		RegistryBackupKeep:     14,
+		SnapshotBalloon:        true,
+		BalloonSettle:          5 * time.Second,
+		DeflateSettle:          1 * time.Second,
 	}
 }
 
@@ -115,6 +131,9 @@ func (c *Config) RegisterFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&c.SyncAck, "sync-ack", c.SyncAck, "hold responses until committed writes are durable at the object store (D1)")
 	fs.UintVar(&c.CellGen, "cell-gen", c.CellGen, "epoch cell-generation prefix; bump after losing the registry database")
 	fs.IntVar(&c.DataDiskMB, "data-disk-mb", c.DataDiskMB, "per-app data disk size ceiling in MiB")
+	fs.StringVar(&c.RegistryBackupStore, "registry-backup-store", c.RegistryBackupStore, "where to ship registry snapshots: file:///path or gs://bucket/prefix (empty = the data-plane objstore)")
+	fs.DurationVar(&c.RegistryBackupInterval, "registry-backup-interval", c.RegistryBackupInterval, "target age of the newest registry backup (0 = disable backups)")
+	fs.IntVar(&c.RegistryBackupKeep, "registry-backup-keep", c.RegistryBackupKeep, "how many registry backups to retain")
 	fs.BoolVar(&c.SnapshotBalloon, "snapshot-balloon", c.SnapshotBalloon, "balloon-reclaim guest RAM before snapshotting (smaller snapshots, slower first wake)")
 	fs.DurationVar(&c.BalloonSettle, "balloon-settle", c.BalloonSettle, "guest reclaim time after balloon inflate")
 	fs.DurationVar(&c.DeflateSettle, "deflate-settle", c.DeflateSettle, "wait after balloon deflate before pausing")

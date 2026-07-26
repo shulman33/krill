@@ -99,8 +99,17 @@ exists yet. The directory is **not yet a git repository** (fix in M1 step 0).
 3. **Dev hardware: scripted on-demand GCP nested virt** (~$1/hr while
    working; `wake-bench/README.md` has the exact command; Local SSD dies with
    the instance; this shape needs Local SSDs in counts of 2/4/8; us-central1
-   was capacity-starved, us-east1-b worked). Permanent always-on hardware
-   (mini-PC vs Hetzner) is deliberately deferred until M4 makes it matter.
+   was capacity-starved, us-east1-b worked). ~~Permanent always-on hardware
+   (mini-PC vs Hetzner) is deliberately deferred until M4 makes it matter.~~
+   **RESOLVED 2026-07-26: Hetzner EX44-1-LTD in FSN1** (i5-13500, 64 GB,
+   2×512 GB NVMe RAID1; €59/mo incl. IPv4, hourly-billed, €0 setup) — the
+   first true bare-metal tier. Cloud-instances-behind-an-LB was evaluated
+   and rejected (nested-virt tax forever, ~5× cost, no real HA — krilld
+   hosts are stateful; the router IS the LB). Sam's M1 Mac mini rejected
+   (no KVM under macOS; aarch64 would fork every artifact). Provisioning
+   runbook: `SERVER-SETUP.md`. M5's second host starts as two nested-KVM
+   VMs on this box (free PT-1 live-fire), then an hourly-billed twin EX44
+   for a weekend — a standing second box must be earned by demand.
 
 ## The milestones
 
@@ -288,7 +297,7 @@ hardening we cannot replicate.
 | Lease/epoch mint at multi-host | **buy (M5)** | etcd lease revisions — fencing tokens are natively its feature. Checks remain conditional PUTs at storage |
 | ext4+jbd2 read-only parser | **replace by rearchitecting (M5)** | No library reads a live guest-written ext4; a host-served block device (NBD/ublk/vhost-user-blk) sees every write and deletes the problem (EBS/Neon shape). Until then the parser stays, guarded by its non-vacuous fixtures |
 | Builder trust boundary | **buy — today-risk #1** | Server-side `docker build` of an untrusted context executes attacker instructions during build, on the host, outside any microVM, with a root daemon. Close with rootless BuildKit / kaniko / builds inside a throwaway Krill microVM (dogfood) **before anyone untrusted can deploy** — see the M4 scope note |
-| Guest egress controls | **buy — today-risk #2** | Nothing today stops an agent-written app from arbitrary outbound traffic: cloud-metadata SSRF (`169.254.169.254` steals the host's GCP credentials), port-25 spam, abuse under the platform's IP reputation. Kernel netfilter (nftables, proven) per tap: drop link-local/metadata destinations outright (one rule — land it in the next code session), default port-25 block + per-app rate limits **no later than the first M4 share link**, an auditing egress proxy later if commercial |
+| Guest egress controls | **buy — today-risk #2** | Nothing today stops an agent-written app from arbitrary outbound traffic: cloud-metadata SSRF (`169.254.169.254` steals the host's GCP credentials — N/A on Hetzner bare metal, real on any cloud host), spam, abuse under the platform's IP reputation. Kernel netfilter (nftables, proven) per tap: drop link-local/metadata destinations on cloud hosts, port-25/465/587 block + per-app rate limits **no later than the first M4 share link**, an auditing egress proxy later if commercial. Hetzner blocks outbound 25/465 provider-side by default (2026-07: confirmed policy) — our baseline still owns 587, HTTP-API abuse, and rate limits. Note guests currently have NO outbound at all (no NAT configured); the baseline lands together with the first masquerade rule |
 | Registry catalog | keep for now | SQLite is fine single-host; Postgres if a control plane ever needs to scale |
 
 ## Resume-leverage backlog (parallel track, low effort, high value)
@@ -452,7 +461,74 @@ Session-level gotchas not recorded elsewhere:
   CLAUDE.md — derivative doc, not part of the tripwire) and recorded the
   commercial build-vs-buy posture (decision #8 + the posture table
   above). No code or protocol changes; spec and the three protocol
-  artifacts untouched.
+  artifacts untouched. **2026-07-26:** production hardware ordered
+  (decision #3 resolved above: Hetzner EX44-1-LTD, FSN1) and
+  `SERVER-SETUP.md` written — provision per that runbook when the
+  delivery email arrives; loopback-only posture until M4.
+  **2026-07-26 (later): THE BOX IS LIVE — `SERVER-SETUP.md` Phases 0–6
+  executed and verified on 46.4.64.187** (`krill-fsn1`, Ubuntu 24.04.4,
+  RAID1 `[UU]` across both NVMe, `systemd-detect-virt` = **none** — the
+  project's first true metal tier). SSH-only inbound (ufw; 8080/9091
+  verified unreachable from outside), keys-only auth, unattended-upgrades
+  on, performance governor pinned, FC v1.16.1 + CI kernel
+  `vmlinux-6.1.155` at `/srv/fc`, krilld under systemd (`Restart=always`,
+  loopback router+admin, data plane + sync-ack on, cell-gen 1) and
+  **verified to come back on its own across a reboot**. First metal
+  deploy: `guestbook` built in 14.8 s and a full durability round-trip
+  passed — write through the router (sync-ack) → freeze → wake-on-request
+  → data survived → ACTIVE. **No code changes were needed to run on
+  metal**; five deviations were all in the runbook, now fixed in
+  `SERVER-SETUP.md` and marked ⚠ (UEFI ESP mandatory — the original
+  partition scheme could not have worked; `installimage` not on `$PATH`
+  non-interactively and the menu unusable under `xterm-ghostty`;
+  `/srv/fc` not created by the FC installer; governor not persistent
+  across reboot; `examples/hello` does not exist — it's `guestbook`).
+  **Informal, NOT a gate result:** wakes ran ~100–120 ms end to end with
+  `last_wake_ms` 49, measured host-side during the initial RAID resync —
+  suggests the ~200 ms guest-userspace tax is much smaller on metal, to
+  be confirmed by a real A1 run once resync completes.
+  **2026-07-26 (later still): PHASE 7 DONE — the box's record now lives
+  off-box.** `--objstore gs://krill-fsn1-objstore/krill` (europe-west3,
+  uniform access, public-access-prevention, versioning + 30-day
+  noncurrent expiry) under a service account scoped to
+  `roles/storage.objectAdmin` **on that bucket only**; registry
+  snapshots ship to `_control/registry/` every 24 h, keeping 14. Proven,
+  not assumed: 5 rows written to `ledger` through the router, then
+  `data.ext4` **and** the ship cursor deleted — the next wake rebuilt
+  `/data` from GCS alone and returned the identical digest. Survives a
+  full reboot (`preflight_ok=true`, key readable unattended at boot).
+  Four pivots from the runbook, all now fixed in `SERVER-SETUP.md`:
+  (1) **the GCS backend could not authenticate on non-GCP hardware** —
+  its chain was `KRILL_GCS_TOKEN` → GCE metadata → `gcloud`, so
+  "put a service-account JSON on the box" had nothing to read it;
+  service-account auth (RSA-signed JWT → OAuth2 jwt-bearer, stdlib only)
+  is new code. (2) **"apps re-seed the new store on next wake" was
+  backwards and destructive** — an empty store means an empty stream
+  (E4), and the rebuild wipes `/data`; the record must be copied first,
+  which is why `objstore.Copy` + `krill objstore-copy` exist.
+  (3) the DB is `krill.db`, not `registry.db`. (4) the nightly
+  `sqlite3 .backup` shell script became in-daemon `VACUUM INTO` + upload
+  (no second copy of the credentials, no `gsutil` on the box).
+  **The cost, measured (informal, N=10, host-side, resync complete):** a
+  GCS round trip from FSN1 to europe-west3 is ~45 ms, so warm wake went
+  ~100–120 ms → **p50 246 ms / p99 280 ms** (`last_wake_ms` 49 → 195)
+  and an acked write costs **p50 188 ms / p99 421 ms**. Off-box
+  durability therefore costs more than the entire metal-tier gain — the
+  right trade (D1 is not kept by a promise on the dying host's disk), but
+  it means **the A1 metal run must use `--objstore file://…` to stay
+  tier-comparable.** Also found: **`guestbook` is not data-plane-backed**
+  (it writes `/var/lib/guestbook.db`, outside `/data`), so its head LSN
+  is permanently 0 — the earlier "durability round-trip passed" was the
+  rootfs surviving, not the stream. Use `ledger` to verify the data plane.
+- **Next action (immediate, on the box):** run the real gates now that
+  metal exists and the RAID resync has **finished** — `m1-gates/` for the
+  project's first metal-tier A1 distribution (**with
+  `--objstore file:///srv/krill/objstore` so the numbers stay comparable
+  to nested virt; GCS adds ~150 ms of wake**), then
+  `wake-bench/30-storm.sh` to close **G4**, the only open benchmark gate
+  (it escalated on nested virt, and the tier rule says a verdict may only
+  be recorded from metal — which we now own). Record both as
+  `RESULTS-2026-07-26-metal.md` per the template convention.
 - **Next action:** M4 (the doorman: edge auth, share links, the
   three-plane ACL), built per decision #8 — proven components for the
   OAuth/session/JWT plumbing, hand-written ACL and per-app token scoping;
@@ -465,3 +541,14 @@ Session-level gotchas not recorded elsewhere:
   investigation, and the blog posts (three written in session history;
   the spec-as-test-oracle sim harness is a strong fifth candidate). Push
   commits to origin at session end (`git push`) so CI badges stay live.
+- **New side quest, now measured and worth ~90 ms of wake latency:** cut
+  round trips to the object store, which Phase 7 put on the critical
+  path at ~45 ms each. Two independent levers, neither taken:
+  (a) `Coordinator.PrepareWake` calls `Gateway.CreateStream` (a manifest
+  load) and then `SealTakeover` (another load + the CAS) — the first load
+  is redundant whenever the stream already exists; (b) caching the
+  manifest generation per app would let the seal skip its read entirely,
+  since a stale generation is exactly what the CAS already catches. Both
+  touch the wake path's fencing sequence, so **the sim harness
+  (`internal/dataplane/sim`, three negative configs) is the gate**, and
+  (b) needs a hard think about PT-9 before it ships.

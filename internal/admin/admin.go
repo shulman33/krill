@@ -9,6 +9,9 @@
 //	POST   /v1/apps/{name}/wake
 //	POST   /v1/apps/{name}/freeze
 //	DELETE /v1/apps/{name}
+//	GET    /v1/objstore            live durability check (a real CAS round trip)
+//	GET    /v1/registry/backups    registry snapshots shipped off-box
+//	POST   /v1/registry/backup     take one now
 //	GET    /healthz
 //
 // (Hand-rolled routing: Go 1.21 ServeMux has no method/wildcard patterns.)
@@ -30,6 +33,8 @@ import (
 	"github.com/shulman33/krill/internal/builder"
 	"github.com/shulman33/krill/internal/guestlog"
 	"github.com/shulman33/krill/internal/lifecycle"
+	"github.com/shulman33/krill/internal/objstore"
+	"github.com/shulman33/krill/internal/regbackup"
 	"github.com/shulman33/krill/internal/registry"
 )
 
@@ -60,6 +65,7 @@ type Server struct {
 	sup *lifecycle.Supervisor
 	bld ImageBuilder
 	dep DeployConfig
+	dur Durability
 	log *slog.Logger
 }
 
@@ -94,10 +100,90 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.list(w)
 	case strings.HasPrefix(path, "/v1/apps/"):
 		s.appRoute(w, r, strings.TrimPrefix(path, "/v1/apps/"))
+	case path == "/v1/objstore" && r.Method == http.MethodGet:
+		s.objstoreCheck(w, r)
+	case path == "/v1/registry/backups" && r.Method == http.MethodGet:
+		s.listBackups(w, r)
+	case path == "/v1/registry/backup" && r.Method == http.MethodPost:
+		s.takeBackup(w, r)
 	default:
 		http.NotFound(w, r)
 	}
 }
+
+// Durability is the optional durability surface: the object store behind the
+// data plane and the registry-backup manager. Set by the daemon after
+// construction (both are nil when --data-plane is off).
+type Durability struct {
+	// Spec is the objstore URL as configured, for display.
+	Spec  string
+	Store objstore.Store
+	// BackupSpec is where registry snapshots go (may differ from Spec).
+	BackupSpec string
+	Backups    *regbackup.Manager
+}
+
+func (s *Server) SetDurability(d Durability) { s.dur = d }
+
+// objstoreCheck answers "is durability actually working right now" with a
+// live conditional-PUT round trip rather than a cached opinion.
+func (s *Server) objstoreCheck(w http.ResponseWriter, r *http.Request) {
+	if s.dur.Store == nil {
+		fail(w, http.StatusServiceUnavailable, errors.New("no object store: the data plane is off"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	out := map[string]any{"spec": s.dur.Spec, "backup_spec": s.dur.BackupSpec}
+	code := http.StatusOK
+	if err := objstore.Check(ctx, s.dur.Store); err != nil {
+		out["ok"], out["error"] = false, err.Error()
+		code = http.StatusServiceUnavailable
+	} else {
+		out["ok"] = true
+	}
+	// After the check, not before: that is when credentials have resolved and
+	// the description can name the identity we are writing as.
+	if d, ok := s.dur.Store.(interface{ Describe() string }); ok {
+		out["store"] = d.Describe()
+	}
+	reply(w, code, out)
+}
+
+func (s *Server) listBackups(w http.ResponseWriter, r *http.Request) {
+	if s.dur.Backups == nil {
+		fail(w, http.StatusServiceUnavailable, errBackupsOff)
+		return
+	}
+	list, err := s.dur.Backups.List(r.Context())
+	if err != nil {
+		fail(w, http.StatusBadGateway, err)
+		return
+	}
+	if list == nil {
+		list = []regbackup.Info{}
+	}
+	reply(w, http.StatusOK, list)
+}
+
+func (s *Server) takeBackup(w http.ResponseWriter, r *http.Request) {
+	if s.dur.Backups == nil {
+		fail(w, http.StatusServiceUnavailable, errBackupsOff)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	info, err := s.dur.Backups.RunOnce(ctx)
+	if err != nil {
+		s.log.Error("registry backup failed", "err", err)
+		fail(w, http.StatusBadGateway, err)
+		return
+	}
+	s.log.Info("registry backed up on request", "key", info.Key, "bytes", info.Bytes)
+	reply(w, http.StatusOK, info)
+}
+
+var errBackupsOff = errors.New("registry backups are disabled (--registry-backup-interval 0)")
 
 func (s *Server) appRoute(w http.ResponseWriter, r *http.Request, rest string) {
 	name, action, _ := strings.Cut(rest, "/")

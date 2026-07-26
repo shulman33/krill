@@ -6,11 +6,13 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,9 +21,10 @@ import (
 	"github.com/shulman33/krill/internal/config"
 	"github.com/shulman33/krill/internal/dataplane"
 	"github.com/shulman33/krill/internal/host"
-	"github.com/shulman33/krill/internal/objstore"
 	"github.com/shulman33/krill/internal/lifecycle"
 	"github.com/shulman33/krill/internal/network"
+	"github.com/shulman33/krill/internal/objstore"
+	"github.com/shulman33/krill/internal/regbackup"
 	"github.com/shulman33/krill/internal/registry"
 	"github.com/shulman33/krill/internal/rootfs"
 	"github.com/shulman33/krill/internal/router"
@@ -42,7 +45,7 @@ func run() error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
-	for _, d := range []string{"apps", "build"} {
+	for _, d := range []string{"apps", "build", "backup"} {
 		if err := os.MkdirAll(filepath.Join(cfg.DataDir, d), 0o755); err != nil {
 			return err
 		}
@@ -62,19 +65,35 @@ func run() error {
 		FreezeTimeout: cfg.BalloonSettle + cfg.DeflateSettle + 90*time.Second,
 		IdleTimeout:   cfg.IdleTimeout,
 	}, log)
+	var store objstore.Store
+	spec := cfg.Objstore
 	if cfg.DataPlane {
-		spec := cfg.Objstore
 		if spec == "" {
 			spec = "file://" + filepath.Join(cfg.DataDir, "objstore")
 		}
-		store, err := objstore.Open(spec)
+		store, err = objstore.Open(spec)
 		if err != nil {
 			return err
+		}
+		// Preflight the store before serving anything. This is not a liveness
+		// ping: it exercises the conditional PUT the fencing protocol rests
+		// on, so a store that silently ignores preconditions is caught here
+		// rather than during a wake. Non-fatal by design — krilld runs under
+		// Restart=always and must not crash-loop on a transient outage — but
+		// loud, because until it passes every wake and every acked write will
+		// fail.
+		pctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		err = objstore.Check(pctx, store)
+		cancel()
+		if err != nil {
+			log.Error("OBJECT STORE PREFLIGHT FAILED — the data plane cannot commit until this is fixed",
+				"objstore", spec, "err", err)
 		}
 		coord := dataplane.NewCoordinator(dataplane.New(store), reg, fs,
 			uint32(cfg.CellGen), cfg.DataDiskMB, log)
 		sup.SetDataPlane(coord)
-		log.Info("data plane on", "objstore", spec, "cell_gen", cfg.CellGen, "sync_ack", cfg.SyncAck)
+		log.Info("data plane on", "objstore", describe(store, spec),
+			"preflight_ok", err == nil, "cell_gen", cfg.CellGen, "sync_ack", cfg.SyncAck)
 	}
 	if err := sup.Reconcile(); err != nil {
 		return err
@@ -84,16 +103,31 @@ func run() error {
 	defer stop()
 	go sup.RunJanitor(ctx)
 
+	// Registry backups: the epoch mint and the app catalog are the only state
+	// on this box that nothing else can reconstruct (E1). RAID1 does not
+	// survive the server.
+	backups, backupSpec, err := setupBackups(cfg, reg, store, spec, log)
+	if err != nil {
+		return err
+	}
+	if backups != nil {
+		go backups.Run(ctx)
+	}
+
 	bld := builder.New(cfg.DockerBin, filepath.Join(cfg.DataDir, "build"))
 	rt := router.New(sup, log)
 	rt.SyncAck = cfg.DataPlane && cfg.SyncAck
 	appSrv := &http.Server{Addr: cfg.ListenAddr, Handler: rt}
-	admSrv := &http.Server{Addr: cfg.AdminAddr, Handler: admin.New(sup, bld, admin.DeployConfig{
+	adm := admin.New(sup, bld, admin.DeployConfig{
 		WorkDir:      filepath.Join(cfg.DataDir, "build"),
 		BaseHost:     cfg.BaseHost,
 		RouterAddr:   cfg.ListenAddr,
 		BuildTimeout: cfg.BuildTimeout,
-	}, log)}
+	}, log)
+	adm.SetDurability(admin.Durability{
+		Spec: spec, Store: store, BackupSpec: backupSpec, Backups: backups,
+	})
+	admSrv := &http.Server{Addr: cfg.AdminAddr, Handler: adm}
 	errCh := make(chan error, 2)
 	go func() { errCh <- serve(appSrv, "router", log) }()
 	go func() { errCh <- serve(admSrv, "admin", log) }()
@@ -115,6 +149,56 @@ func run() error {
 	_ = appSrv.Shutdown(shCtx)
 	_ = admSrv.Shutdown(shCtx)
 	return nil
+}
+
+// setupBackups resolves where registry snapshots go and builds the manager.
+// Returns (nil, "", nil) when backups are disabled or have nowhere to go.
+func setupBackups(cfg config.Config, reg *registry.Registry, dataStore objstore.Store, dataSpec string, log *slog.Logger) (*regbackup.Manager, string, error) {
+	if cfg.RegistryBackupInterval <= 0 {
+		log.Warn("registry backups DISABLED (--registry-backup-interval 0): " +
+			"the epoch mint and app catalog exist only on this host")
+		return nil, "", nil
+	}
+	store, spec := dataStore, dataSpec
+	if cfg.RegistryBackupStore != "" {
+		s, err := objstore.Open(cfg.RegistryBackupStore)
+		if err != nil {
+			return nil, "", fmt.Errorf("--registry-backup-store: %w", err)
+		}
+		store, spec = s, cfg.RegistryBackupStore
+	}
+	if store == nil {
+		log.Warn("registry backups have nowhere to go: set --registry-backup-store " +
+			"(the data plane is off, so there is no object store to inherit)")
+		return nil, "", nil
+	}
+	if strings.HasPrefix(spec, "file://") {
+		// Worth saying out loud: a backup on the same disk as the original
+		// protects against `rm krill.db`, and against nothing else.
+		log.Warn("registry backups are staying on this host — a dead server takes them with it",
+			"backup_store", spec)
+	}
+	m := regbackup.New(regbackup.Config{
+		Store:    store,
+		Source:   reg,
+		WorkDir:  filepath.Join(cfg.DataDir, "backup"),
+		CellGen:  uint32(cfg.CellGen),
+		Interval: cfg.RegistryBackupInterval,
+		Keep:     cfg.RegistryBackupKeep,
+		Log:      log,
+	})
+	log.Info("registry backups on", "store", spec,
+		"interval", cfg.RegistryBackupInterval.String(), "keep", cfg.RegistryBackupKeep)
+	return m, spec, nil
+}
+
+// describe prefers a backend's own description (which names the credential
+// identity for GCS) over the raw spec.
+func describe(store objstore.Store, spec string) string {
+	if d, ok := store.(interface{ Describe() string }); ok {
+		return d.Describe()
+	}
+	return spec
 }
 
 func serve(s *http.Server, name string, log *slog.Logger) error {

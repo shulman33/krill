@@ -10,6 +10,9 @@
 //	krill delete <app>
 //	krill stream <app>   data-plane stream: head LSN, epoch, segments, branches
 //	krill restore <app> --at-lsn N | --at-time RFC3339   PITR (branching)
+//	krill durability     object-store check + registry backups shipped off-box
+//	krill backup         snapshot the registry (the epoch mint) right now
+//	krill objstore-copy --from <spec> --to <spec>   move the record between stores
 //
 // The admin API address comes from --admin or KRILL_ADMIN (default
 // http://127.0.0.1:9091 — run on the host, or bring an SSH tunnel).
@@ -41,7 +44,8 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: krill <deploy|apps|status|logs|wake|freeze|delete|stream|restore> [args]\n(see the package comment in cmd/krill)")
+		return fmt.Errorf("usage: krill <deploy|apps|status|logs|wake|freeze|delete|stream|restore|" +
+			"durability|backup|objstore-copy> [args]\n(see the package comment in cmd/krill)")
 	}
 	c := &client{admin: envOr("KRILL_ADMIN", "http://127.0.0.1:9091")}
 	cmd, rest := args[0], args[1:]
@@ -64,6 +68,12 @@ func run(args []string) error {
 		return c.appJSON(rest, "stream", "/stream")
 	case "restore":
 		return c.restore(rest)
+	case "durability":
+		return c.durability(rest)
+	case "backup":
+		return c.backup(rest)
+	case "objstore-copy":
+		return c.objstoreCopy(rest)
 	default:
 		return fmt.Errorf("unknown command %q", cmd)
 	}

@@ -20,9 +20,18 @@ import (
 // GCS is the real-object-store backend, via the XML API with plain net/http:
 // conditional PUTs (x-goog-if-generation-match) give the manifest CAS that
 // E4 requires, and skipping the official SDK keeps krilld's dependency
-// closure tiny. Auth resolves, in order: KRILL_GCS_TOKEN (static, tests),
-// the GCE metadata server (production on GCP), `gcloud auth
-// print-access-token` (the dev-box pattern from the ROADMAP's bq gotcha).
+// closure tiny. Auth resolves, in order:
+//
+//	KRILL_GCS_TOKEN                 static token (tests, break-glass)
+//	KRILL_GCS_CREDENTIALS or
+//	GOOGLE_APPLICATION_CREDENTIALS  service-account JSON key (see gcsauth.go)
+//	the GCE metadata server          production on GCP
+//	gcloud auth print-access-token   dev boxes
+//
+// The service-account path is what production on non-GCP hardware uses: the
+// Hetzner box is not a GCE instance and has no gcloud. An explicitly
+// configured key file therefore outranks the ambient sources — dropping a
+// key in and pointing the env var at it is an unambiguous instruction.
 type GCS struct {
 	Bucket string
 	Prefix string
@@ -32,10 +41,14 @@ type GCS struct {
 	HTTPClient *http.Client
 	// TokenFunc overrides auth resolution in tests.
 	TokenFunc func(ctx context.Context) (string, error)
+	// CredentialsFile is the service-account JSON key path. Empty = resolve
+	// from the environment (CredentialsPath).
+	CredentialsFile string
 
 	mu       sync.Mutex
 	tok      string
 	tokUntil time.Time
+	authVia  string
 }
 
 func NewGCS(bucket, prefix string) *GCS { return &GCS{Bucket: bucket, Prefix: prefix} }
@@ -226,19 +239,72 @@ func (s *GCS) token(ctx context.Context) (string, error) {
 		return s.tok, nil
 	}
 	if t := os.Getenv("KRILL_GCS_TOKEN"); t != "" {
-		s.tok, s.tokUntil = t, time.Now().Add(time.Hour)
+		s.set(t, time.Hour, "KRILL_GCS_TOKEN")
+		return t, nil
+	}
+	if path := s.credPath(); path != "" {
+		sa, err := loadServiceAccount(path)
+		if err != nil {
+			// A configured-but-broken key is a hard error, never a silent
+			// fallthrough to some ambient identity with different powers.
+			return "", err
+		}
+		c := s.HTTPClient
+		if c == nil {
+			c = &http.Client{Timeout: 30 * time.Second}
+		}
+		t, ttl, err := sa.token(ctx, c, time.Now())
+		if err != nil {
+			return "", err
+		}
+		s.set(t, ttl-time.Minute, "service account "+sa.ClientEmail)
 		return t, nil
 	}
 	if t, ttl, err := metadataToken(ctx); err == nil {
-		s.tok, s.tokUntil = t, time.Now().Add(ttl-time.Minute)
+		s.set(t, ttl-time.Minute, "GCE metadata server")
 		return t, nil
 	}
 	out, err := exec.CommandContext(ctx, "gcloud", "auth", "print-access-token").Output()
 	if err != nil {
-		return "", fmt.Errorf("objstore gcs: no auth (set KRILL_GCS_TOKEN, run on GCE, or install gcloud): %w", err)
+		return "", fmt.Errorf("objstore gcs: no usable credentials: set KRILL_GCS_CREDENTIALS to a "+
+			"service-account JSON key (the non-GCP production path), or KRILL_GCS_TOKEN, or run on GCE, "+
+			"or install gcloud: %w", err)
 	}
-	s.tok, s.tokUntil = strings.TrimSpace(string(out)), time.Now().Add(30*time.Minute)
+	s.set(strings.TrimSpace(string(out)), 30*time.Minute, "gcloud CLI")
 	return s.tok, nil
+}
+
+func (s *GCS) credPath() string {
+	if s.CredentialsFile != "" {
+		return s.CredentialsFile
+	}
+	return CredentialsPath()
+}
+
+// set records a fresh token; caller holds s.mu.
+func (s *GCS) set(tok string, ttl time.Duration, via string) {
+	s.tok, s.tokUntil, s.authVia = tok, time.Now().Add(ttl), via
+}
+
+// AuthVia names the credential source that last produced a token (""
+// before the first request). Startup logs print it: "which identity is this
+// daemon writing as" is the first question of any objstore permission bug.
+func (s *GCS) AuthVia() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authVia
+}
+
+// Describe is the human-readable target, for logs and the admin API.
+func (s *GCS) Describe() string {
+	d := "gs://" + s.Bucket
+	if s.Prefix != "" {
+		d += "/" + strings.TrimSuffix(s.Prefix, "/")
+	}
+	if via := s.AuthVia(); via != "" {
+		d += " (auth: " + via + ")"
+	}
+	return d
 }
 
 func metadataToken(ctx context.Context) (string, time.Duration, error) {

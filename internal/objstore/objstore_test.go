@@ -23,72 +23,78 @@ func TestStoreContract(t *testing.T) {
 	}
 	for name, mk := range backends {
 		t.Run(name, func(t *testing.T) {
-			ctx := context.Background()
-			s := mk(t)
-
-			// Missing object.
-			if _, _, err := s.Get(ctx, "a/b"); !errors.Is(err, ErrNotFound) {
-				t.Fatalf("Get missing: %v, want ErrNotFound", err)
-			}
-
-			// Create-if-absent (expect 0).
-			gen, err := s.PutCAS(ctx, "a/b", []byte("v1"), 0)
-			if err != nil {
-				t.Fatalf("PutCAS create: %v", err)
-			}
-			if gen == 0 {
-				t.Fatal("PutCAS returned generation 0 for a live object")
-			}
-			// Second create-if-absent must conflict.
-			if _, err := s.PutCAS(ctx, "a/b", []byte("v1b"), 0); !errors.Is(err, ErrCASConflict) {
-				t.Fatalf("PutCAS duplicate create: %v, want ErrCASConflict", err)
-			}
-
-			// Read observes the write and its generation.
-			data, got, err := s.Get(ctx, "a/b")
-			if err != nil || string(data) != "v1" || got != gen {
-				t.Fatalf("Get: %q gen %d err %v, want v1 gen %d", data, got, err, gen)
-			}
-
-			// CAS with the right generation advances; wrong generation conflicts
-			// and leaves the object untouched.
-			gen2, err := s.PutCAS(ctx, "a/b", []byte("v2"), gen)
-			if err != nil || gen2 <= gen {
-				t.Fatalf("PutCAS advance: gen %d err %v", gen2, err)
-			}
-			if _, err := s.PutCAS(ctx, "a/b", []byte("evil"), gen); !errors.Is(err, ErrCASConflict) {
-				t.Fatalf("stale CAS: %v, want ErrCASConflict", err)
-			}
-			data, got, _ = s.Get(ctx, "a/b")
-			if string(data) != "v2" || got != gen2 {
-				t.Fatalf("after stale CAS: %q gen %d, want v2 gen %d (stale write mutated state)", data, got, gen2)
-			}
-
-			// Unconditional Put + List ordering.
-			for _, k := range []string{"seg/2", "seg/1", "other/x"} {
-				if err := s.Put(ctx, k, []byte(k)); err != nil {
-					t.Fatalf("Put %s: %v", k, err)
-				}
-			}
-			keys, err := s.List(ctx, "seg/")
-			if err != nil {
-				t.Fatalf("List: %v", err)
-			}
-			if len(keys) != 2 || keys[0] != "seg/1" || keys[1] != "seg/2" {
-				t.Fatalf("List seg/: %v", keys)
-			}
-
-			// Delete is idempotent.
-			if err := s.Delete(ctx, "seg/1"); err != nil {
-				t.Fatalf("Delete: %v", err)
-			}
-			if err := s.Delete(ctx, "seg/1"); err != nil {
-				t.Fatalf("Delete twice: %v", err)
-			}
-			if _, _, err := s.Get(ctx, "seg/1"); !errorsIsNotFound(err) {
-				t.Fatalf("Get deleted: %v", err)
-			}
+			runStoreContract(t, mk(t))
 		})
+	}
+}
+
+// runStoreContract is the CAS-semantics suite, shared by the fake backends
+// and the live-GCS test so a real bucket is held to exactly the same bar.
+func runStoreContract(t *testing.T, s Store) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Missing object.
+	if _, _, err := s.Get(ctx, "a/b"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get missing: %v, want ErrNotFound", err)
+	}
+
+	// Create-if-absent (expect 0).
+	gen, err := s.PutCAS(ctx, "a/b", []byte("v1"), 0)
+	if err != nil {
+		t.Fatalf("PutCAS create: %v", err)
+	}
+	if gen == 0 {
+		t.Fatal("PutCAS returned generation 0 for a live object")
+	}
+	// Second create-if-absent must conflict.
+	if _, err := s.PutCAS(ctx, "a/b", []byte("v1b"), 0); !errors.Is(err, ErrCASConflict) {
+		t.Fatalf("PutCAS duplicate create: %v, want ErrCASConflict", err)
+	}
+
+	// Read observes the write and its generation.
+	data, got, err := s.Get(ctx, "a/b")
+	if err != nil || string(data) != "v1" || got != gen {
+		t.Fatalf("Get: %q gen %d err %v, want v1 gen %d", data, got, err, gen)
+	}
+
+	// CAS with the right generation advances; wrong generation conflicts
+	// and leaves the object untouched.
+	gen2, err := s.PutCAS(ctx, "a/b", []byte("v2"), gen)
+	if err != nil || gen2 <= gen {
+		t.Fatalf("PutCAS advance: gen %d err %v", gen2, err)
+	}
+	if _, err := s.PutCAS(ctx, "a/b", []byte("evil"), gen); !errors.Is(err, ErrCASConflict) {
+		t.Fatalf("stale CAS: %v, want ErrCASConflict", err)
+	}
+	data, got, _ = s.Get(ctx, "a/b")
+	if string(data) != "v2" || got != gen2 {
+		t.Fatalf("after stale CAS: %q gen %d, want v2 gen %d (stale write mutated state)", data, got, gen2)
+	}
+
+	// Unconditional Put + List ordering.
+	for _, k := range []string{"seg/2", "seg/1", "other/x"} {
+		if err := s.Put(ctx, k, []byte(k)); err != nil {
+			t.Fatalf("Put %s: %v", k, err)
+		}
+	}
+	keys, err := s.List(ctx, "seg/")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(keys) != 2 || keys[0] != "seg/1" || keys[1] != "seg/2" {
+		t.Fatalf("List seg/: %v", keys)
+	}
+
+	// Delete is idempotent.
+	if err := s.Delete(ctx, "seg/1"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if err := s.Delete(ctx, "seg/1"); err != nil {
+		t.Fatalf("Delete twice: %v", err)
+	}
+	if _, _, err := s.Get(ctx, "seg/1"); !errorsIsNotFound(err) {
+		t.Fatalf("Get deleted: %v", err)
 	}
 }
 
@@ -112,25 +118,41 @@ type fakeGCS struct {
 		gen  int64
 	}
 	nextGen int64
+	// token is the bearer it demands; "" means "test-token".
+	token string
 }
 
 func newFakeGCS(t *testing.T) Store {
+	g, _ := newFakeGCSStore(t, "")
+	g.TokenFunc = func(context.Context) (string, error) { return "test-token", nil }
+	return g
+}
+
+// newFakeGCSStore wires a GCS client to a fake bucket demanding the given
+// bearer token, leaving auth resolution to the real code path.
+func newFakeGCSStore(t *testing.T, token string) (*GCS, *fakeGCS) {
 	f := &fakeGCS{objs: map[string]struct {
 		data []byte
 		gen  int64
-	}{}}
+	}{}, token: token}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	g := NewGCS("bkt", "pre/fix")
 	g.Endpoint = srv.URL
-	g.TokenFunc = func(context.Context) (string, error) { return "test-token", nil }
-	return g
+	return g, f
+}
+
+func (f *fakeGCS) bearer() string {
+	if f.token == "" {
+		return "test-token"
+	}
+	return f.token
 }
 
 func (f *fakeGCS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if r.Header.Get("Authorization") != "Bearer test-token" {
+	if r.Header.Get("Authorization") != "Bearer "+f.bearer() {
 		http.Error(w, "no auth", http.StatusUnauthorized)
 		return
 	}
@@ -195,4 +217,3 @@ func (f *fakeGCS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad method", http.StatusMethodNotAllowed)
 	}
 }
-
