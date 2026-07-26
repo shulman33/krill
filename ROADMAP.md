@@ -244,7 +244,31 @@ Rules E1–E6 as code, built and green under `-race`:
 Gates: `m3-gates/GATES.md` was pre-registered before any code; all four
 passed (see the heading above and the results file).
 
-### M4 — the doorman (~1–2 weeks)
+### M4 — the doorman (~3–4 weeks; gates frozen 2026-07-26 in `m4-gates/GATES.md`)
+
+⚠ **Scope grew on 2026-07-26, with Sam, and the estimate grew with it.** The
+"~1–2 weeks" below was the doorman alone. M4 now carries **three** theses —
+edge auth, an isolated builder, and first exposure — because Sam chose to
+ship all three planes including remote `edit`. That makes builder isolation
+(today-risk #1) and the egress baseline (today-risk #2) unconditional M4
+scope rather than the conditional "once shares reach untrusted people"
+written below. The rejected alternative was shipping use+data first and
+splitting the builder into an M4.5. **If M4 must be cut, cut at the plane
+boundary** — ship F1–F4 + F7 with `edit` ungranteable and let F5/F6 become
+M4.5 — never by weakening a gate.
+
+Share model, also frozen: **the link is the capability.** A recipient opens
+an unguessable link, signs in with Google, and is bound to the ACL at claim
+time; Sam never needs to know their address in advance, which is what makes
+the human gate winnable. The builder gets dogfooded: untrusted
+`docker build` moves into a throwaway Krill microVM — the platform isolating
+its own builder with the primitive it sells.
+
+Gates **F1–F7**, pre-registered before any M4 code, in `m4-gates/GATES.md`.
+⚠ The letter is F ("front door") because **D is taken** by the durability
+contract D1–D4, as E, G and I are by the epoch rules, benchmark gates and
+invariants — all load-bearing across the tripwire artifacts. The skipped
+letters are deliberate; the gates file says so too.
 
 Edge auth proxy: Google OAuth, signed identity header scoped per app
 (`X-App-User` + JWT), share links / domain shares / revoke, the three-plane
@@ -594,21 +618,25 @@ Session-level gotchas not recorded elsewhere:
   three-plane ACL), built per decision #8 — proven components for the
   OAuth/session/JWT plumbing, hand-written ACL and per-app token scoping;
   builder isolation and the egress baseline enter M4 scope once shares
-  reach untrusted people. **Its infrastructure prerequisites are now all
-  closed** (Phase 7 durability, Phase 8 DNS + ACME token), so the next
-  concrete step is the discipline every prior milestone used: **freeze
-  the acceptance gates before writing doorman code.** ⚠ Name them
-  **F1–F4** ("F" for front door) — the natural next letter, D, collides
-  with the durability contract D1–D4, which is load-bearing across the
-  spec and both HTML docs (CLAUDE.md tripwire); note the skipped letter
-  in the gates file. Candidates: F1 unauthenticated request to a shared
-  app → Google login → app serves with correct `X-App-User`; F2 revoke
-  takes effect on the next request; F3 the three planes actually
-  separate (a use-only user cannot reach the data/edit surfaces —
-  **and the router pins the host suffix**, which it does not today);
-  F4 the human gate — a non-technical friend opens a share link cold,
-  zero setup. Note F1 and F4 are the two that genuinely required a
-  domain; F2/F3 are provable over the tunnel. Or the queued side quests
+  reach untrusted people — **and as of 2026-07-26 they do, by decision:
+  see the scope note on M4 above.** Its infrastructure prerequisites are
+  all closed (Phase 7 durability, Phase 8 DNS + ACME token) and **the
+  gates are frozen: `m4-gates/GATES.md`, F1–F7, written before any M4
+  code exists.** F1 identity at the edge (stranger → Google → correct,
+  verifiable `X-App-User`); F2 revoke on the very next request, durable
+  across restart, for both a claimed identity and a link; F3 the three
+  planes separate under real requests, plus per-app token audience and
+  **host-suffix pinning** (today `router.appName` accepts any suffix);
+  F4 the human gate; F5 a hostile Dockerfile stays inside the builder
+  microVM; F6 the egress baseline (apps silent, builders reach only a
+  registry); F7 exposure — wildcard TLS, and the admin API still
+  unreachable afterwards. **Ordering rule, this milestone's PT-3:**
+  F1–F3, F5, F6 are all provable through the tunnel before anything is
+  exposed; F4 and F7 are the only gates needing the public listener and
+  run last. A green F4 obtained by exposing the router early is a failed
+  milestone, not an early one. So the next code step is the doorman
+  itself (proven components for OAuth/session/JWT, hand-written ACL +
+  share links + per-app scoping). Or the queued side quests
   first: the
   guest-egress netfilter baseline (the metadata-IP drop is one rule —
   cheapest risk-close on the board), MCP stream/restore tools,
