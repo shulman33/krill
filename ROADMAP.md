@@ -40,7 +40,7 @@ exists yet. The directory is **not yet a git repository** (fix in M1 step 0).
 | `FencingProtocol.tla` + `.cfg` | **Model-checked**: all 7 invariants hold over 26,618 states; each of the 3 fence toggles produces a counterexample when disabled. TLC found PT-9 ("slow waker") after human review missed it. |
 | Architecture doc (`docs/sleeping-cloud-architecture.html`) | 6 diagrams, D1–D6, fence pills mark epoch-check enforcement points. |
 | Plain-English explainer (`docs/sleeping-cloud-explained.html`) | For non-engineers; analogies mirror the technical docs. |
-| Wake-path benchmark (`wake-path-benchmark.md` + `wake-bench/`) | **RAN 2026-07-23 on GCP nested virt (~$2.50 total).** G1 ✓ (warm resume p99 115 ms), G2 ✓ (cold 432 ms), G3 ✓ (69 MB stored/app), G5 ✓ (14.5× vs cold boot), G4 escalate-at-N=50-only (linear to N=25; throughput already 6× requirement). **Decision: COMMIT to the microVM architecture.** Full data: `wake-bench/RESULTS-2026-07-23-nested.md` + `wake-bench/results-nested-2026-07-23/`. |
+| Wake-path benchmark (`wake-path-benchmark.md` + `wake-bench/`) | **RAN 2026-07-23 on GCP nested virt (~$2.50 total).** G1 ✓ (warm resume p99 115 ms), G2 ✓ (cold 432 ms), G3 ✓ (69 MB stored/app), G5 ✓ (14.5× vs cold boot), G4 escalate-at-N=50-only (linear to N=25; throughput already 6× requirement). **Decision: COMMIT to the microVM architecture.** Full data: `wake-bench/RESULTS-2026-07-23-nested.md` + `wake-bench/results-nested-2026-07-23/`. **RE-RAN 2026-07-26 ON METAL: G4 CLOSED — p99 109 ms at N=50, 0 errors (was 4206 ms nested), so all five gates now PASS and no open benchmark gate remains.** G1 26 ms, G5 42× on the same box. `wake-bench/RESULTS-2026-07-26-metal.md`. |
 | GCP project `ycombinator-503223` | **Clean — nothing billing.** Instance deleted 2026-07-23; full resource sweep confirmed zero instances/disks/IPs/snapshots/buckets/datasets. |
 
 ## Decisions made (with what was rejected)
@@ -277,8 +277,8 @@ homegrown lease service, and the fences stay at the storage layer per the
 spec: etcd replaces the *mint*, never the checks), host-served data disks
 (NBD/ublk/vhost-user-blk) to retire the `internal/ext4` jbd2 parser, UFFD
 lazy restore from network storage, content-addressed snapshot dedupe,
-`i3.metal` hour to close G4, VMGenID reseeding, web dashboard, custom
-domains.
+VMGenID reseeding, web dashboard, custom domains. (The `i3.metal` hour to
+close G4 was never needed — the Hetzner box closed it on 2026-07-26.)
 
 ## Commercial posture — build vs. buy (recorded 2026-07-24)
 
@@ -520,25 +520,48 @@ Session-level gotchas not recorded elsewhere:
   (it writes `/var/lib/guestbook.db`, outside `/data`), so its head LSN
   is permanently 0 — the earlier "durability round-trip passed" was the
   rootfs surviving, not the stream. Use `ledger` to verify the data plane.
-- **Next action (immediate, on the box):** run the real gates now that
-  metal exists and the RAID resync has **finished** — `m1-gates/` for the
-  project's first metal-tier A1 distribution (**with
-  `--objstore file:///srv/krill/objstore` so the numbers stay comparable
-  to nested virt; GCS adds ~150 ms of wake**), then
-  `wake-bench/30-storm.sh` to close **G4**, the only open benchmark gate
-  (it escalated on nested virt, and the tier rule says a verdict may only
-  be recorded from metal — which we now own). Record both as
-  `RESULTS-2026-07-26-metal.md` per the template convention.
-  **Prep is staged and the procedure is written** — see "Running the gate
-  suites on this box" in `SERVER-SETUP.md`: bench guest images built,
-  `/srv/snaps/python` ready, so G4 is one command; and the gate scripts
-  now refuse to fight the systemd daemon (they used to `pkill` it) and
-  honor `KRILL_DATA`/`KRILLD_EXTRA_FLAGS` so A1 can run on a scratch data
-  dir in three configurations (data plane off / fsstore / GCS) —
-  **krilld's taps must be deleted first**, they hold `172.16.0.1/30`
-  against the bench's `172.16.0.1/24`. Untimed prep already yielded one
-  metal number: cold boot-to-first-200 **904 ms** (~1.8× faster than the
-  nested G5 ratio implies).
+  **2026-07-26 (last): THE METAL GATES ARE RUN. G4 IS CLOSED AND NO OPEN
+  BENCHMARK GATE REMAINS IN THE PROJECT.**
+  `wake-bench/RESULTS-2026-07-26-metal.md` and
+  `m1-gates/RESULTS-2026-07-26-metal.md`. Headlines, all host-side with the
+  resync complete and the governor pinned:
+  **G4 PASS(metal)** — N=50, p99 **109 ms** vs the 1 s gate, 0 errors,
+  against 4206 ms on nested virt. A 39× move that confirms the tier-1
+  diagnosis exactly: 16 nested vCPUs were aggregate-CPU-bound on VM
+  exits, not an architectural ceiling. All 50 resumes landed inside
+  117 ms of wall clock (~430 wakes/s burst for clones of one snapshot;
+  the model needs ~2/s/host). Density 50 resident VMs = **+451 MB**
+  (~9 MB each, 57× denser than naive) because the snapshot's memory is
+  file-backed and shared.
+  **G1 PASS(metal)** 26 ms p99 (was 115 ms), **G5 PASS(metal)** 42× (was
+  14.5×); G2/G3 stand at tier 1 where a PASS is conclusive.
+  **A1 PASS(metal)** p99 **90 ms** vs the 300 ms gate in its
+  pre-registered configuration (`--data-plane=false`), 3.3× faster than
+  nested's 298 ms. Ran three ways on the same box, which prices
+  everything added since M1: data plane on with a **local** store costs
+  **5 ms at p99** (95 ms) — the fencing really is latency-noise — while
+  the **production GCS** configuration is p50 258 / **p99 285 ms**.
+  ⚠ **That passes A1 by 15 ms.** The 195 ms is not the data plane, it is
+  the distance to the object store (~45 ms × 3 round trips on the wake
+  path), so the two round-trip cuts logged below stopped being an
+  optimization and became the margin on the project's headline gate.
+  **The M1 "~200 ms guest-userspace tax" question is answered:** same
+  guest, same code, same instrumented boundary, only the tier changed —
+  `acquire_ms` 41–49 → 24–33 and `proxy_ms` 211–256 → **43–46**. It was
+  overwhelmingly a nested-virt artifact. What is left is a ~20 ms
+  question (the bench's simpler guest resumes in 22 ms on this box), which
+  demotes it well below M4.
+  Two pivots to make the suites runnable on a production box, both fixed
+  in commit 9bd13c6 and documented in `SERVER-SETUP.md` ("Running the
+  gate suites on this box"): `m1-gates/00-setup.sh` used to `pkill -x
+  krilld`, which under `Restart=always` yields two daemons fighting over
+  ports, taps and the data dir (it now refuses, and honors `KRILL_DATA`
+  so gates run on a scratch dir); and **krilld's taps must be deleted
+  first** — they hold `172.16.0.1/30` while the bench wants
+  `172.16.0.1/24`, and the `/30` wins the route, so the bench guest is
+  unreachable. Deleting them is safe: deterministic host MACs mean a
+  re-created tap keeps restored guests' ARP caches valid, verified by
+  waking both apps afterwards with no rebuild and no fence.
 - **Next action:** M4 (the doorman: edge auth, share links, the
   three-plane ACL), built per decision #8 — proven components for the
   OAuth/session/JWT plumbing, hand-written ACL and per-app token scoping;
@@ -547,13 +570,16 @@ Session-level gotchas not recorded elsewhere:
   guest-egress netfilter baseline (the metadata-IP drop is one rule —
   cheapest risk-close on the board), MCP stream/restore tools,
   segment group-commit batching + GC past checkpoints (both noted in the
-  M3 results findings), the ~200 ms guest-userspace wake-tax
-  investigation, and the blog posts (three written in session history;
+  M3 results findings), and the blog posts (three written in session history;
   the spec-as-test-oracle sim harness is a strong fifth candidate). Push
   commits to origin at session end (`git push`) so CI badges stay live.
-- **New side quest, now measured and worth ~90 ms of wake latency:** cut
+- **Promoted from side quest to margin work by the 2026-07-26 A1 run:** cut
   round trips to the object store, which Phase 7 put on the critical
-  path at ~45 ms each. Two independent levers, neither taken:
+  path at ~45 ms each. The production configuration now passes A1 with
+  **15 ms to spare**, so this is no longer an optimization — it is the
+  difference between a gate that passes and one that does not survive a
+  slower region or one extra round trip. Two independent levers, neither
+  taken:
   (a) `Coordinator.PrepareWake` calls `Gateway.CreateStream` (a manifest
   load) and then `SealTakeover` (another load + the CAS) — the first load
   is redundant whenever the stream already exists; (b) caching the

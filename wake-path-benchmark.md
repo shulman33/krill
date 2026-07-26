@@ -8,7 +8,11 @@
 
 **Companion scripts.** `wake-bench/` in this repo contains every script referenced below, syntax-checked and ready to `scp -r wake-bench root@BOX:` — day 1 on the box is pure copy-paste. See `wake-bench/README.md` for the run order.
 
-**Status: tier 1 RUN, 2026-07-23.** Full results in `wake-bench/RESULTS-2026-07-23-nested.md`. Headlines: warm resume **p99 115 ms** (G1 ✓), cold **432 ms** (G2 ✓), **69 MB stored/app** after dedupe (G3 ✓, 3.6× headroom), **14.5×** resume-vs-boot (G5 ✓), storm linear to N=25 then CPU-bound at N=50 (G4 = ESCALATE per the tier rule; sustained throughput already 6× the model's requirement). **Decision: commit to the microVM architecture.** Total cost: ~$2.50.
+**Status: tier 1 RUN 2026-07-23; tier 2 (METAL) RUN 2026-07-26 — ALL FIVE GATES PASS, no open benchmark gates remain.**
+
+Tier 1 (`wake-bench/RESULTS-2026-07-23-nested.md`, ~$2.50 of GCP): warm resume **p99 115 ms** (G1 ✓), cold **432 ms** (G2 ✓), **69 MB stored/app** after dedupe (G3 ✓, 3.6× headroom), **14.5×** resume-vs-boot (G5 ✓), storm linear to N=25 then CPU-bound at N=50 (G4 = ESCALATE per the tier rule). **Decision: commit to the microVM architecture.**
+
+Tier 2 (`wake-bench/RESULTS-2026-07-26-metal.md`, the Hetzner EX44): **G4 CLOSED — p99 109 ms at N=50 with zero errors**, a 39× improvement that confirms the tier-1 escalation was aggregate-CPU-bound on nested VM exits and not an architectural ceiling. G1 and G5 re-measured for free: warm resume **p99 26 ms** (11.5× headroom), resume-vs-boot **42×**. G2 and G3 stand at tier 1, where a PASS is conclusive.
 
 ---
 
