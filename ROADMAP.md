@@ -82,6 +82,44 @@ exists yet. The directory is **not yet a git repository** (fix in M1 step 0).
    "Commercial posture — build vs. buy" below. Rejected: Litestream/LiteFS as data-plane replacements
    (both trust the guest or treat a lease as correctness — violates the
    untrusted-guest model and PT-3).
+9. **The doorman's shape (2026-07-26, with Sam): Caddy terminates TLS and
+   `forward_auth`s to a small unprivileged `krill-doorman` process, which
+   owns its own SQLite; krilld's router stays on loopback, untouched.**
+   Two constraints forced most of this and neither was a preference:
+   **(a)** F3 forbids an unauthorized request from waking an app ("a fence
+   that bills is still a fence that failed"), and krilld's router wakes on
+   request — so authorization must complete strictly *upstream* of krilld.
+   **(b)** krilld is root (taps, `mkfs.ext4`, docker), so the
+   internet-facing OAuth surface cannot live inside it without contradicting
+   the thesis of F5/F6.
+   **Consequence worth stating loudly: the router never un-loopbacks.** Caddy
+   binds 443 and proxies to `127.0.0.1:8080`, so the "un-loopback the router"
+   step written into earlier plans simply never happens — a risk deleted
+   rather than sequenced. F7 is graded accordingly.
+   **The wake hold stays in krilld's router** — `Acquire` is single-flight,
+   `ModifyResponse` carries M3 sync-ack, `retryTransport` races the guest's
+   accept loop, and all of it was gated by C1–C4. An earlier framing of this
+   decision ("Caddy with the wake hold as middleware") was wrong and is
+   recorded here so it doesn't get re-proposed.
+   *Rejected:* **oauth2-proxy** as the doorman — its model is a static
+   allowlist with no hook for "on successful callback, bind this identity to
+   the capability token in the original URL," which *is* the frozen share
+   model, so it degenerates to authenticate-everyone plus our own authz
+   service anyway, paying a process and a hop for cookie handling alone.
+   **Pomerium** — heavier, and its policy language can't express a link
+   capability either. **Auth state in krilld's registry** (shared file *or*
+   via the admin API) — the registry holds the E1 mint, and its recovery
+   story is "roll back ≤24 h and bump `cell_gen`," which is correct for a
+   fenced mint and catastrophic for auth: a rollback un-revokes shares.
+   Auth state and the mint want opposite things from a restore and therefore
+   cannot share a restore path (now F2's corollary).
+   *Still ours to write, per decision #8:* the ACL, share links + claim,
+   three planes, per-app JWT audience, revoke. *Bought:* ACME + renewal
+   (Caddy + `caddy-dns/cloudflare`), the OIDC flow and Google JWKS
+   verification (`x/oauth2` + `coreos/go-oidc`). Sessions become an opaque
+   256-bit ID pointing at a row — **F2 already forbade stateless cookies**,
+   so the dangerous parts of hand-rolled sessions (signing, expiry, rotation,
+   key management) never come into existence.
 
 ## M1-gating decisions — RESOLVED with Sam, 2026-07-23
 
@@ -623,8 +661,11 @@ Session-level gotchas not recorded elsewhere:
   all closed (Phase 7 durability, Phase 8 DNS + ACME token) and **the
   gates are frozen: `m4-gates/GATES.md`, F1–F7, written before any M4
   code exists.** F1 identity at the edge (stranger → Google → correct,
-  verifiable `X-App-User`); F2 revoke on the very next request, durable
-  across restart, for both a claimed identity and a link; F3 the three
+  verifiable `X-App-User`); F2 revoke on the very next request, for both a
+  claimed identity and a link, durable across restart **and across total
+  local-state loss — amended 2026-07-26 (a tightening, still before any M4
+  code; see the Amendments table in the gates file), because a revoke a
+  recovery can undo is not a revoke**; F3 the three
   planes separate under real requests, plus per-app token audience and
   **host-suffix pinning** (today `router.appName` accepts any suffix);
   F4 the human gate; F5 a hostile Dockerfile stays inside the builder

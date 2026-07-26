@@ -4,6 +4,10 @@
 benchmark and M1/M2/M3: the pass/fail criteria are frozen here first, so the
 implementation can't quietly bend the test to fit what got built.*
 
+*Amended once since freezing — F2, 2026-07-26, still before any M4 code. See
+**Amendments** at the end; the rule that governs changes to a frozen gate is
+recorded there too.*
+
 M4 is **the doorman**: the first milestone where software Sam did not write
 is driven by people Sam did not vet. Three theses, one milestone (scope
 decided 2026-07-26, see "Scope decisions" below):
@@ -98,23 +102,43 @@ happens inside the router's hold: the user sees a slow first byte, never a
 wrong, or unverifiable; or the flow requires the recipient to create anything
 (an account, a password, an invite acceptance) beyond signing in with Google.
 
-## F2 — Revoke takes effect on the next request
+## F2 — Revoke takes effect on the next request, and never comes back
 
 The property that makes sharing safe to do casually. Sessions are a cache;
-revocation must not wait for one to expire.
+revocation must not wait for one to expire — and must not be resurrected by
+a recovery.
+
+*⚠ **Amended 2026-07-26**, after freezing and before any M4 code, to add
+step 3 and the off-box clause. A **tightening** discovered while designing
+where auth state lives (see "Amendments" at the end of this file). The
+original gate stopped at "survives a krilld restart," which the doorman's
+recovery story then showed to be too weak.*
 
 1. With the F1 session live and working, revoke — both variants:
    a. revoke the **claimed identity** (`krill unshare ledger --user …`);
    b. revoke the **link** itself, with a second identity holding a live
       session claimed from that same link.
 2. From the already-authenticated browser, issue the very next request.
+3. **Revocation survives host loss** (C1's shape, applied to auth): with the
+   revocation in place, destroy local auth state — stop the doorman, delete
+   its database — **without touching the object store**. Restore it from the
+   object store alone and re-issue the request from step 2.
 
 **PASS:** both next requests are refused (403), with no krilld restart, no
 app freeze/wake in between, and no waiting out a TTL. A revoked link cannot
-be re-claimed by anyone. Revocation is durable: it survives a krilld restart
-and an app freeze/wake cycle.
+be re-claimed by anyone. Revocation is durable across a doorman restart, a
+krilld restart, an app freeze/wake cycle, **and step 3's total local-state
+loss** — meaning a revoke is not acknowledged to the operator until it is
+durable at the object store, the same rule D1 imposes on an app's writes.
 **FAIL:** the revoked session serves even once; or refusal depends on a cookie
-or JWT expiring; or the revocation is lost across a restart.
+or JWT expiring; or the revocation is lost across a restart; or **a restore
+resurrects it** — a revoke that a recovery can undo is not a revoke.
+
+*Corollary the implementation must respect: auth state and the registry have
+opposite recovery requirements and therefore cannot share a restore path. The
+registry is safe to roll back because `cell_gen` fences everything older;
+revocations must never move backwards. Rolling the mint back is the design;
+rolling a revocation back is this gate's FAIL.*
 
 ## F3 — The three planes actually separate, and the door has one keyhole
 
@@ -282,3 +306,24 @@ convention, with the same tier honesty as every prior suite.
   should stay untripped. If the doorman ever needs to touch an E-rule, stop
   and follow the CLAUDE.md checklist — spec first, TLC positive plus all
   three negative configs, then both HTML docs, then republish.
+
+## Amendments
+
+A frozen gate is not immutable, but changes to one are **asymmetric**, and the
+asymmetry is the whole point:
+
+- **Tightening** — making a gate harder to pass — is the discipline working.
+  Design work legitimately discovers that a criterion was too weak. Allowed,
+  recorded here with its reason.
+- **Loosening** — making a gate easier to pass — is what pre-registration
+  exists to prevent, and is nearly always the implementation asking the test
+  to move. It requires a written reason that does **not** reference what has
+  already been built, and it is far more suspect after code exists than
+  before.
+
+Record every amendment here with date, direction, and whether M4 code existed
+at the time.
+
+| Date | Gate | Direction | Code existed? | Why |
+|---|---|---|---|---|
+| 2026-07-26 | F2 | **tightening** | no | Deciding where auth state lives showed that the registry and the ACL want *opposite* things from a restore: the mint is safe to roll back because `cell_gen` fences it, while a rolled-back revocation silently un-revokes a share. The original "survives a krilld restart" would have passed a doorman that loses revocations on host loss. Added step 3 (survive total local-state loss) and the requirement that a revoke isn't acked until durable at the object store — D1's rule, applied to auth. |
