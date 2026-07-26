@@ -529,6 +529,16 @@ Session-level gotchas not recorded elsewhere:
   (it escalated on nested virt, and the tier rule says a verdict may only
   be recorded from metal — which we now own). Record both as
   `RESULTS-2026-07-26-metal.md` per the template convention.
+  **Prep is staged and the procedure is written** — see "Running the gate
+  suites on this box" in `SERVER-SETUP.md`: bench guest images built,
+  `/srv/snaps/python` ready, so G4 is one command; and the gate scripts
+  now refuse to fight the systemd daemon (they used to `pkill` it) and
+  honor `KRILL_DATA`/`KRILLD_EXTRA_FLAGS` so A1 can run on a scratch data
+  dir in three configurations (data plane off / fsstore / GCS) —
+  **krilld's taps must be deleted first**, they hold `172.16.0.1/30`
+  against the bench's `172.16.0.1/24`. Untimed prep already yielded one
+  metal number: cold boot-to-first-200 **904 ms** (~1.8× faster than the
+  nested G5 ratio implies).
 - **Next action:** M4 (the doorman: edge auth, share links, the
   three-plane ACL), built per decision #8 — proven components for the
   OAuth/session/JWT plumbing, hand-written ACL and per-app token scoping;
